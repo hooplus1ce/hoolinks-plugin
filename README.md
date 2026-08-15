@@ -1,4 +1,4 @@
-# qa-automation — Agent Plugin
+# hoolinks-plugin — Agent Plugin
 
 企业级 Web 系统 UI 自动化测试插件，符合 [Agent Plugins 1.0.0](https://agent-plugins.org/specification) 打包规范：可移植的 **Agent Skills**（测试设计矩阵 / 执行与回归）+ **MCP 服务器**（FastMCP，CDP 浏览器接管、验证码/视觉识别、VTable 表格、用例录制导出）。
 
