@@ -39,24 +39,29 @@ def _find_plugin_root() -> Path:
 # Agent Plugins 一致性客户端注入 PLUGIN_ROOT；开发直跑时回退为向上搜索到的插件根。
 PLUGIN_ROOT = Path(os.environ.get("PLUGIN_ROOT", _find_plugin_root()))
 load_dotenv(PROJECT_ROOT / ".env", override=False)
-# 数据根（accounts.json / .auth / artifacts）：客户端经 mcp.json 注入
-# PROJECT_DIR=${PLUGIN_ROOT} 时锚定插件根；否则与插件包数据同址。
-PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", PLUGIN_ROOT))
+# 服务私有数据根（accounts.json / .auth）：固定在 MCP 项目目录（mcp/qa-automation），
+# 不随插件包（PLUGIN_ROOT）或使用方项目变化；PROJECT_DIR 可显式覆盖（绝对路径）。
+PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", PROJECT_ROOT))
+# 资产根：使用该插件的项目目录（截图/导出用例/下载/证据等生成文件）。
+# 由使用方注入 WORK_DIR（Agent 客户端环境变量或 mcp.json env）；未配置回退 PROJECT_DIR。
+WORK_DIR = Path(os.environ.get("WORK_DIR", PROJECT_DIR))
 
 
 def project_path(path: str) -> str:
-    """将相对路径锚定到项目根（绝对路径/空串原样返回，~ 展开为用户目录）。"""
+    """将相对路径锚定到资产根 WORK_DIR（绝对路径/空串原样返回，~ 展开为用户目录）。"""
     if not path:
-        return str(PROJECT_DIR)
+        return str(WORK_DIR)
     expanded = os.path.expanduser(path)
     if os.path.isabs(expanded):
         return expanded
-    return str(PROJECT_DIR / expanded)
+    return str(WORK_DIR / expanded)
 
 
-# ---- 目录常量（统一锚定 PROJECT_DIR）----
+# ---- 目录常量 ----
+# 凭据/登录态（服务私有）→ PROJECT_DIR（mcp/qa-automation）
 AUTH_DIR = PROJECT_DIR / ".auth"
-ARTIFACTS_DIR = PROJECT_DIR / "artifacts"
+# 生成资产（截图/导出/下载/证据）→ WORK_DIR（使用该插件的项目目录）
+ARTIFACTS_DIR = WORK_DIR / "artifacts"
 SCREENSHOT_DIR = ARTIFACTS_DIR / "screenshots"
 DOWNLOAD_DIR = Path(project_path(os.getenv("DOWNLOAD_DIR", "downloads")))
 OUTPUT_DIR = Path(project_path(os.getenv("OUTPUT_DIR", "output_testcases")))

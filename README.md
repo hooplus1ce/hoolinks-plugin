@@ -8,13 +8,16 @@
 ├── plugin.json          # Agent Plugins 1.0.0 插件清单（$schema + name + 元数据）
 ├── mcp.json             # stdio MCP 服务器声明（uv run fastmcp run fastmcp.json）
 ├── skills/              # 固定位置：Agent Skills（qa-automation-guide / ui-automation-test）
-├── accounts.json.example# 多账号凭据模板（复制为 accounts.json 后填写）
+├── accounts.json.example# 多账号凭据模板（复制为 mcp/qa-automation/accounts.json 后填写）
 ├── scripts/validate.py  # 插件一致性检查（零依赖）
 └── mcp/                 # uv workspace（多 MCP 项目共享一个 .venv）
     └── qa-automation/   # 本项目 MCP 服务（FastMCP 3.x，Python >=3.14）
         ├── pyproject.toml / uv.lock / .python-version
         ├── fastmcp.json          # FastMCP 声明式服务器配置
         ├── .env.example          # 环境变量模板（复制为 .env 后填写）
+        ├── accounts.json         # 多账号凭据（运行时数据，gitignore，模板见根 accounts.json.example）
+        ├── .auth/                # 登录态（OAuth/cookie，运行时生成，gitignore）
+        ├── artifacts/            # 本地开发默认资产目录（生产由 WORK_DIR 指向使用方项目）
         └── src/qa_automation/    # server.py / config.py / browser/ / components/
 ```
 
@@ -42,11 +45,14 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 | `FASTMCP_LOG_LEVEL` / `FASTMCP_TRANSPORT` | 否 | 日志级别 / 传输方式（默认 stdio） |
 | `CDP_URL` | 否 | 浏览器接管端点（默认 `http://127.0.0.1:9222`） |
 | `VISUAL_CURSOR_ENABLED` | 否 | 虚拟光标/目标高亮默认开关 |
-| `PROJECT_DIR` | 否 | 数据根覆盖（默认插件根；插件环境由 mcp.json 注入 `${PLUGIN_ROOT}`） |
+| `PROJECT_DIR` | 否 | 服务私有数据根（accounts.json/.auth），默认 `mcp/qa-automation` |
+| `WORK_DIR` | 否 | **资产根**：截图/导出/下载/证据等生成文件保存到使用该插件的项目目录；由使用方注入（Agent 客户端环境变量或 mcp.json env），未配置回退 PROJECT_DIR |
+
+> 资产文件默认经 `mcp.json` 注入 `WORK_DIR=${PLUGIN_DATA}`（Agent Plugins 客户端管理的插件数据目录，§9.1）；若要保存到具体的用户项目目录，由使用方把 `WORK_DIR` 指向该项目即可。
 
 ### 2. `accounts.json`（可选，多账号）
 
-将 `accounts.json.example` 复制为插件根 `accounts.json` 并填写。结构：
+将 `accounts.json.example` 复制为 `mcp/qa-automation/accounts.json` 并填写。结构：
 
 ```json
 {
@@ -61,9 +67,16 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 ### 3. `.auth/`（运行时自动生成，无需手动配置）
 
-`.auth/` 存放程序生成的**登录态**（OAuth token、cookie 快照，如 `session_save_state` 的落盘、Antigravity 视觉授权凭据）。该目录由工具自动写入/读取，**请勿手动编辑或提交**，已 gitignore。
+`mcp/qa-automation/.auth/` 存放程序生成的**登录态**（OAuth token、cookie 快照，如 `session_save_state` 的落盘、Antigravity 视觉授权凭据）。该目录由工具自动写入/读取，**请勿手动编辑或提交**，已 gitignore。
 
-> **为什么 `accounts.json` 不放进 `.auth/`**：`accounts.json` 是用户维护的**输入配置**（账号/密码，静态、由人管理），`.auth/` 是程序产生的**运行状态**（会话/令牌，动态、由工具生成）。二者生命周期不同——清空登录态重登时不应误删账号配置，反之亦然——故保持分离。统一收纳会带来"清理状态连带删除配置"的风险。
+> **为什么 `accounts.json` 不放进 `.auth/`**：`accounts.json` 是用户维护的**输入配置**（账号/密码，静态、由人管理），`.auth/` 是程序产生的**运行状态**（会话/令牌，动态、由工具生成）。二者生命周期不同——清空登录态重登时不应误删账号配置，反之亦然——故保持分离（同处 `mcp/qa-automation/` 但分目录）。统一收纳会带来"清理状态连带删除配置"的风险。
+
+## 数据与资产分层
+
+| 类别 | 位置 | 说明 |
+|---|---|---|
+| 凭据/登录态 | `mcp/qa-automation/`（accounts.json + .auth/） | 服务私有，固定在 MCP 项目目录，不随插件包或使用方项目变化 |
+| 生成资产 | `WORK_DIR`（默认 `${PLUGIN_DATA}`） | 截图/导出用例/下载/证据，保存到使用该插件的项目目录 |
 
 ## 本地开发
 
