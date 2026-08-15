@@ -1048,7 +1048,7 @@ async def page_fill(
 
 @tool(
     title="Page: Screenshot",
-    description="页面截图保存到 artifacts/screenshots/ 并返回路径。",
+    description="页面或元素截图，保存到 artifacts/screenshots/ 并返回路径。传元素定位参数（role/name/text/placeholder/css/xpath 任选其一）截取该元素的图像；不传定位则截取页面（full_page 控制整页或当前视口）。",
     icons=[_BROWSER_ICON],
     tags={"browser", "page", "qa"},
 )
@@ -1057,20 +1057,44 @@ async def page_screenshot(
     session: str | None = None,
     path: str | None = None,
     full_page: bool = False,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    placeholder: str | None = None,
+    css: str | None = None,
+    xpath: str | None = None,
 ) -> dict:
-    """页面截图。
+    """页面或元素截图。
 
     Args:
         session: 目标会话名（多账号场景必须显式指定，防止操作落到其他账号窗口；可先 session_list 确认映射）；缺省使用激活会话。
         path: 保存路径；缺省 artifacts/screenshots/ 时间戳命名。
-        full_page: 是否整页截图。
+        full_page: 是否整页截图（仅页面模式；元素截图始终为元素边界图像）。
+        role/name/text/placeholder/css/xpath: 元素定位（任选其一）。提供任一 →
+            截取该元素图像（自动滚动到元素、支持 iframe 内元素）；全部缺省 →
+            截取页面（full_page 决定整页/视口）。
     """
     lc = _lifecycle(ctx)
     try:
         page = await lc.page(session)
         dest = Path(path) if path else SCREENSHOT_DIR / f"shot_{int(time.time() * 1000)}.png"
         dest.parent.mkdir(parents=True, exist_ok=True)
+        locator_args = {
+            "role": role,
+            "name": name,
+            "text": text,
+            "placeholder": placeholder,
+            "css": css,
+            "xpath": xpath,
+        }
+        if any(v is not None for v in locator_args.values()):
+            # 元素截图：语义定位（iframe 自动穿透），截取元素边界图像
+            locator = await _resolve_locator(page, **locator_args)
+            await locator.screenshot(path=str(dest))
+            return {"ok": True, "path": str(dest), "mode": "element"}
+        # 页面截图：full_page 决定整页滚动截图或当前视口
         await page.screenshot(path=str(dest), full_page=full_page)
-        return {"ok": True, "path": str(dest)}
+        mode = "full-page" if full_page else "viewport"
+        return {"ok": True, "path": str(dest), "mode": mode}
     except Exception as exc:
         return _err(exc)
