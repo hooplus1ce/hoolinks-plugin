@@ -33,6 +33,28 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 客户端克隆后即可发现 `skills/` 中的技能并启动 `mcp.json` 声明的 stdio 服务器（一致性客户端自动注入 `PLUGIN_ROOT`/`PLUGIN_DATA` 并展开 `${PLUGIN_ROOT}`）。
 
+### 初始化与配置（安装后必做）
+
+**① 初始化共享环境**（`.venv` 被 gitignore、不在仓库内，clone 后不存在）：
+
+```bash
+cd mcp          # uv workspace 根
+uv sync         # 生成 mcp/.venv 并安装全部依赖（需已安装 uv）
+```
+
+> Agent 平台托管启动时，`mcp.json` 的 `uv run` 会在首次连接时自动完成环境准备（首次较慢属正常）；手动部署/开发请显式执行上面两步。
+
+**② 配置环境变量**——**只有 `SCM_BASE_URL` 是必填**，其余全部可选：
+
+| 步骤 | 操作 |
+|---|---|
+| 1 | 复制 `mcp/qa-automation/.env.example` → `mcp/qa-automation/.env` |
+| 2 | 编辑 `.env`，填写**必填项** `SCM_BASE_URL`（被测系统根地址） |
+| 3 | （可选）按需调整 `CDP_URL`（浏览器接管端点）、`WORK_DIR`（资产根）、`DOWNLOAD_DIR`/`OUTPUT_DIR`/`EVIDENCE_DIR`、时序参数——完整清单与默认值见下方「配置」 |
+| 4 | （可选，多账号）复制 `mcp/qa-automation/accounts.json.example` → `accounts.json` 并填写账号 |
+
+未配置 `SCM_BASE_URL` 时，登录/验证码类工具返回明确错误；浏览器接管、页面操作、截图等其余功能不依赖它。
+
 ### 远程 MCP 服务（tencent-docs）
 
 `mcp.json` 还声明了一个远程 Streamable HTTP 服务 `tencent-docs`（`https://docs.qq.com/openapi/mcp`）。按 Agent Plugins 规范，**认证凭据不写入插件配置**（headers 是可见包数据且不做占位符展开），授权由客户端在连接时管理：
@@ -104,10 +126,14 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 ### 第 1 步：环境准备
 
 ```bash
-# mcp/qa-automation/.env（必填）
-SCM_BASE_URL=https://scm.example.com
+# ① 初始化共享环境（首次）
+cd mcp && uv sync
 
-# mcp/qa-automation/accounts.json（可选，多账号）
+# ② mcp/qa-automation/.env —— 复制 .env.example 后填写必填项
+SCM_BASE_URL=https://scm.example.com
+# 可选：CDP_URL、WORK_DIR、DOWNLOAD_DIR/OUTPUT_DIR/EVIDENCE_DIR 等见「配置」
+
+# ③ mcp/qa-automation/accounts.json（可选，多账号）
 {"base_url": "https://scm.example.com", "accounts": {"admin": {"username": "u_admin", "password": "***"}}}
 ```
 
