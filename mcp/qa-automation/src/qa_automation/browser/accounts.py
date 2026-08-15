@@ -19,8 +19,8 @@ from typing import Any
 
 from qa_automation.config import PROJECT_DIR
 
-# accounts.json 是插件级数据（插件根），不是实现目录数据：锚定 PROJECT_DIR
-# （一致性客户端经 mcp.json 注入 PROJECT_DIR=${PLUGIN_ROOT}，直接运行则回退 mcp/）。
+# accounts.json 是服务私有凭据数据，固定在 MCP 项目目录（config.PROJECT_DIR，
+# 默认 mcp/qa-automation，可由 PROJECT_DIR 环境变量显式覆盖）。
 ACCOUNTS_FILE = PROJECT_DIR / "accounts.json"
 
 

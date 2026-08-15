@@ -25,7 +25,7 @@ from qa_automation.config import (
     ACTION_RETRY_BACKOFF_MS,
     DOWNLOAD_DIR,
     ELEMENT_WAIT_TIMEOUT_MS,
-    PROJECT_DIR,
+    WORK_DIR,
 )
 
 _TRANSFER_ICON = Icon(
@@ -38,19 +38,19 @@ _XLSX_EXT = (".xlsx", ".xlsm")
 
 
 def _resolve_download_dir(download_dir: str | None) -> str:
-    """解析下载保存目录：相对路径锚定 PROJECT_DIR（而非进程 cwd），绝对路径原样。"""
+    """解析下载保存目录：相对路径锚定 WORK_DIR（使用该插件的项目目录，而非进程 cwd），绝对路径原样。"""
     base = download_dir or str(DOWNLOAD_DIR)
     path = (
         os.path.abspath(base)
         if os.path.isabs(base)
-        else os.path.abspath(os.path.join(PROJECT_DIR, base))
+        else os.path.abspath(os.path.join(WORK_DIR, base))
     )
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def _resolve_upload_paths(file_paths: list[str]) -> list[str]:
-    """上传文件路径解析：相对路径优先基于 PROJECT_DIR，其次进程 cwd；必须存在。"""
+    """上传文件路径解析：相对路径优先基于 WORK_DIR（使用该插件的项目目录），其次进程 cwd；必须存在。"""
     if not file_paths:
         raise RuntimeError("file_paths 不能为空")
     resolved: list[str] = []
@@ -60,7 +60,7 @@ def _resolve_upload_paths(file_paths: list[str]) -> list[str]:
             candidates = [os.path.abspath(p)]
         else:
             candidates = [
-                os.path.abspath(os.path.join(PROJECT_DIR, p)),
+                os.path.abspath(os.path.join(WORK_DIR, p)),
                 os.path.abspath(p),
             ]
         found = next((c for c in candidates if os.path.isfile(c)), None)
