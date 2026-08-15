@@ -51,7 +51,7 @@ uv sync         # 生成 mcp/.venv 并安装全部依赖（需已安装 uv）
 | 1 | 复制 `mcp/qa-automation/.env.example` → `mcp/qa-automation/.env` |
 | 2 | 编辑 `.env`，填写**必填项** `SCM_BASE_URL`（被测系统根地址） |
 | 3 | （可选）按需调整 `CDP_URL`（浏览器接管端点）、`WORK_DIR`（资产根）、`DOWNLOAD_DIR`/`OUTPUT_DIR`/`EVIDENCE_DIR`、时序参数——完整清单与默认值见下方「配置」 |
-| 4 | （可选，多账号）复制 `mcp/qa-automation/accounts.json.example` → `accounts.json` 并填写账号 |
+| 4 | （可选，多账号）复制 `mcp/qa-automation/accounts.json.example` → **`mcp/qa-automation/accounts.json`**（必须与模板同目录，服务器固定在该位置读取，勿放到仓库根） |
 
 未配置 `SCM_BASE_URL` 时，登录/验证码类工具返回明确错误；浏览器接管、页面操作、截图等其余功能不依赖它。
 
