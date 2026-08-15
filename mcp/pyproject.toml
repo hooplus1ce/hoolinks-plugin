@@ -1,0 +1,8 @@
+# uv workspace 根：mcp/ 下所有 MCP 项目共享同一 .venv / uv.lock / 解释器。
+# 新增 MCP 服务：在 mcp/ 下建子目录（uv 项目），加入 members 即可复用环境。
+[tool.uv.workspace]
+members = ["qa-automation"]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true

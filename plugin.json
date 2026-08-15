@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "qa-automation",
+  "version": "0.1.0",
+  "description": "QA automation plugin for Shenghetang APS/SCM/WMS: UI-testing Agent Skills (test-design matrix, execution, regression) plus a FastMCP stdio MCP server (CDP browser takeover, captcha/visual recognition, VTable grid, case recording/export). 生和堂企业级 UI 自动化测试插件。",
+  "author": {
+    "name": "Hoolinks QA",
+    "url": "https://www.hoolinks.com"
+  },
+  "keywords": [
+    "qa",
+    "automation",
+    "ui-testing",
+    "regression",
+    "mcp",
+    "playwright",
+    "vtable",
+    "visual-recognition"
+  ],
+  "extensions": {
+    "dev.hoolinks.qa-automation": {
+      "implementation": "fastmcp",
+      "entrypoint": "mcp/qa-automation/src/qa_automation/server.py",
+      "projectConfig": "mcp/qa-automation/fastmcp.json"
+    }
+  }
+}

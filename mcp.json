@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "qa-automation": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "fastmcp", "run", "fastmcp.json"],
+      "cwd": "./mcp/qa-automation",
+      "env": {
+        "PROJECT_DIR": "${PLUGIN_ROOT}"
+      }
+    }
+  }
+}

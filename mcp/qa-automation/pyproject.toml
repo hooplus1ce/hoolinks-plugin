@@ -1,0 +1,26 @@
+[project]
+name = "qa-automation"
+version = "0.1.0"
+description = "QA automation MCP server (FastMCP) — Agent Plugins 'qa-automation' mcp component"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=3.4.7",
+    "httpx>=0.28.1",
+    "playwright>=1.62.0",
+    "python-dotenv>=1.2.2",
+    "openpyxl>=3.1.5",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
