@@ -83,8 +83,8 @@ _INSTALL_JS = r"""
     mount();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const distance = Math.hypot(x - state.x, y - state.y);
-    // 与参考实现对齐并加深减速（MOVEMENT_SLOWDOWN=3），保证移动轨迹清晰可见
-    const duration = reduced ? 0 : Math.round(Math.min(640, Math.max(280, (110 + Math.sqrt(distance) * 7) * 3)));
+    // 与参考实现对齐并加深减速（MOVEMENT_SLOWDOWN=5），保证移动轨迹清晰可见
+    const duration = reduced ? 0 : Math.round(Math.min(1000, Math.max(280, (110 + Math.sqrt(distance) * 7) * 5)));
     state.cursor?.classList.add('on');
     state.anim?.cancel();
     const from = { x: state.x, y: state.y };
