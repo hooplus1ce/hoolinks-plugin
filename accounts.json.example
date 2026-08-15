@@ -1,0 +1,7 @@
+{
+  "base_url": "https://your-scm-host.example.com",
+  "accounts": {
+    "admin": { "username": "your-admin-user", "password": "your-admin-password" },
+    "operator": { "username": "your-operator-user", "password": "your-operator-password" }
+  }
+}

@@ -427,8 +427,9 @@ async def session_open_isolated(
         username/password: 显式凭据（account 为空时使用）。
     """
     from qa_automation.browser import accounts
-    from qa_automation.browser.login import DEFAULT_SCM_BASE_URL, api_login_and_inject
+    from qa_automation.browser.login import api_login_and_inject
     from qa_automation.browser.vision import VisionCaptchaRecognizer
+    from qa_automation.config import SCM_BASE_URL
 
     lc = _lifecycle(ctx)
     try:
@@ -454,7 +455,7 @@ async def session_open_isolated(
         cfg = accounts.load_accounts()
         base_url = (
             cfg.get("base_url")
-            or os.environ.get("SCM_BASE_URL", DEFAULT_SCM_BASE_URL)
+            or SCM_BASE_URL
         ).rstrip("/")
         cred = accounts.resolve(account, username, password)
         if cred is None:

@@ -44,7 +44,8 @@ class LoginError(RuntimeError):
     """登录失败：HTTP 错误或服务端显式拒绝。"""
 
 
-# demo18-scm.hoolinks.com（WMS 管理平台）登录接口实测参数（API 直登模式）
+# SCM/WMS 管理平台登录接口实测参数（API 直登模式；被测系统的接口路径/字段名
+# 不同时按实际调整，配置源为 .env SCM_BASE_URL 与 accounts.json）
 SCM_LOGIN_CONFIG: dict[str, Any] = {
     "validate_code_path": "/scmpsm/login/validateCode",
     "signin_path": "/scmpsm/login/signin",
@@ -59,7 +60,7 @@ SCM_LOGIN_CONFIG: dict[str, Any] = {
     "token_cookie_name": "HL-Access-Token",
 }
 
-from qa_automation.config import SCM_BASE_URL as DEFAULT_SCM_BASE_URL
+from qa_automation.config import SCM_BASE_URL
 
 
 async def api_login_and_inject(
@@ -134,7 +135,7 @@ async def captcha_login(
     """执行验证码登录，返回可注入 Playwright 上下文的 cookie 列表。
 
     Args:
-        base_url: 系统根地址（如 https://demo18-scm.hoolinks.com）。
+        base_url: 系统根地址（如 https://your-scm-host.example.com）。
         username: 登录账号。
         password: 登录密码。
         ocr: 具备 classification(image_bytes) -> str 的识别器（见 OcrHolder）。

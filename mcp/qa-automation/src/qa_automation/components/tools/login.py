@@ -12,8 +12,9 @@ from fastmcp import Context
 from fastmcp.tools import tool
 from mcp.types import Icon
 
-from qa_automation.browser.login import DEFAULT_SCM_BASE_URL, api_login_and_inject
+from qa_automation.browser.login import api_login_and_inject
 from qa_automation.browser.vision import VisionCaptchaRecognizer
+from qa_automation.config import SCM_BASE_URL
 
 _LOGIN_ICON = Icon(
     src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyNCcgaGVpZ2h0PScyNCc+PHJlY3QgeD0nNCcgeT0nOScgd2lkdGg9JzE2JyBoZWlnaHQ9JzEwJyByeD0nMicgZmlsbD0nbm9uZScgc3Ryb2tlPSclMjMxZjdhZTQnIHN0cm9rZS13aWR0aD0nMicvPjxwYXRoIGQ9J00xMCAyMHYtNW0wLTJ2LTNhNiA2IDAgMCAxIDEyIDAnIGZpbGw9J25vbmUnIHN0cm9rZT0nJTIzMWY3YWU0JyBzdHJva2Utd2lkdGg9JzInLz48Y2lyY2xlIGN4PScxNicgY3k9JzE1JyByPScxJyBmaWxsPSclMjMxZjdhZTQnLz48L3N2Zz4=",
@@ -65,7 +66,7 @@ async def login_with_captcha(
     base_url = (
         base_url
         or cfg.get("base_url")
-        or os.environ.get("SCM_BASE_URL", DEFAULT_SCM_BASE_URL)
+        or SCM_BASE_URL
     ).rstrip("/")
     cred = accounts.resolve(account, username, password)
     if cred is None:

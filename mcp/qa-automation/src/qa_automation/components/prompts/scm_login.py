@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from fastmcp.prompts import prompt
 
-DEFAULT_BASE_URL = "https://demo18-scm.hoolinks.com/static/admin"
+from qa_automation.config import SCM_BASE_URL
+
+# 登录后目标页面：由 .env SCM_BASE_URL 派生（未配置则为空，客户端应传入 base_url）。
+DEFAULT_BASE_URL = (SCM_BASE_URL.rstrip("/") + "/static/admin") if SCM_BASE_URL else ""
 
 
 @prompt(

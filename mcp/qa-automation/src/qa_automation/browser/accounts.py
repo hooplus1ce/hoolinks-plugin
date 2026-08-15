@@ -3,7 +3,7 @@
 结构::
 
     {
-      "base_url": "https://demo18-scm.hoolinks.com",
+      "base_url": "https://<your-scm-host>",
       "accounts": {
         "admin":    {"username": "...", "password": "..."},
         "operator": {"username": "...", "password": "..."}

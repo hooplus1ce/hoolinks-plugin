@@ -83,7 +83,9 @@ CONNECT_RETRY_ATTEMPTS = _env_int("CONNECT_RETRY_ATTEMPTS", 3)
 CONNECT_RETRY_BACKOFF_MS = _env_int("CONNECT_RETRY_BACKOFF_MS", 1500)
 
 # ---- 登录 / 视觉 ----
-SCM_BASE_URL = os.getenv("SCM_BASE_URL", "https://demo18-scm.hoolinks.com")
+# 被测系统根地址：必填，经 .env SCM_BASE_URL 配置（或 accounts.json base_url）。
+# 不提供默认域名——不同部署环境的系统地址由部署方注入，避免业务域名写死在代码。
+SCM_BASE_URL = os.getenv("SCM_BASE_URL", "")
 # 虚拟光标/目标高亮服务级默认开关（工具未显式传 visualize 时生效）
 VISUAL_EFFECTS = _env_bool("VISUAL_CURSOR_ENABLED", False)
 

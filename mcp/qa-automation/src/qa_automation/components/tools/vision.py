@@ -128,10 +128,16 @@ async def captcha_recognize(
     import os
     import time as _time
 
-    from qa_automation.browser.login import DEFAULT_SCM_BASE_URL, SCM_LOGIN_CONFIG
+    from qa_automation.browser.login import SCM_LOGIN_CONFIG
+    from qa_automation.config import SCM_BASE_URL
 
-    base = (base_url or os.environ.get("SCM_BASE_URL", DEFAULT_SCM_BASE_URL)).rstrip("/")
+    base = (base_url or SCM_BASE_URL).rstrip("/")
     if url is None:
+        if not base:
+            return {
+                "ok": False,
+                "error": "missing base_url：请配置 SCM_BASE_URL（.env）或传入 url/base_url 参数",
+            }
         url = (
             f"{base}{SCM_LOGIN_CONFIG['validate_code_path']}"
             f"?key={SCM_LOGIN_CONFIG['validate_code_key']}&random={_time.time():.6f}"
