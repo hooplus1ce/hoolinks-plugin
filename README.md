@@ -33,6 +33,14 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 客户端克隆后即可发现 `skills/` 中的技能并启动 `mcp.json` 声明的 stdio 服务器（一致性客户端自动注入 `PLUGIN_ROOT`/`PLUGIN_DATA` 并展开 `${PLUGIN_ROOT}`）。
 
+### 远程 MCP 服务（tencent-docs）
+
+`mcp.json` 还声明了一个远程 Streamable HTTP 服务 `tencent-docs`（`https://docs.qq.com/openapi/mcp`）。按 Agent Plugins 规范，**认证凭据不写入插件配置**（headers 是可见包数据且不做占位符展开），授权由客户端在连接时管理：
+
+- 在 Agent 客户端的 per-server 授权/凭据配置中为 `tencent-docs` 提供 token，客户端连接时注入 `Authorization`
+- FastMCP 客户端可显式使用 `StreamableHttpTransport(url=..., auth=BearerAuth("<token>"))`
+- 未配置授权时该服务**连接失败不影响其他服务**（§7.2.2：独立组件失败非致命），`qa-automation` 照常可用
+
 ## 配置
 
 ### 必填环境变量
