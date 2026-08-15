@@ -1,6 +1,8 @@
-# hoolinks-plugin — qa-automation
+# qa-automation — Agent Plugin
 
-生和堂 APS/SCM/WMS 企业级 UI 自动化测试 Agent 插件，符合 [Agent Plugins 1.0.0](https://agent-plugins.org/specification) 打包规范：可移植的 **Agent Skills**（测试设计矩阵 / 执行与回归）+ **MCP 服务器**（FastMCP，CDP 浏览器接管、验证码/视觉识别、VTable 表格、用例录制导出）。
+企业级 Web 系统 UI 自动化测试插件，符合 [Agent Plugins 1.0.0](https://agent-plugins.org/specification) 打包规范：可移植的 **Agent Skills**（测试设计矩阵 / 执行与回归）+ **MCP 服务器**（FastMCP，CDP 浏览器接管、验证码/视觉识别、VTable 表格、用例录制导出）。
+
+被测系统域名、账号等环境相关值一律通过配置文件注入，代码与仓库内不含任何业务域名硬编码。
 
 ## 目录结构
 
@@ -12,13 +14,13 @@
 └── mcp/                 # uv workspace（多 MCP 项目共享一个 .venv）
     └── qa-automation/   # 本项目 MCP 服务（FastMCP 3.x，Python >=3.14）
         ├── pyproject.toml / uv.lock / .python-version
-        ├── fastmcp.json          # FastMCP 声明式服务器配置
-        ├── .env.example          # 环境变量模板（复制为 .env 后填写）
-        ├── accounts.json.example # 多账号凭据模板（复制为 accounts.json 后填写）
-        ├── accounts.json         # 多账号凭据（运行时数据，gitignore）
-        ├── .auth/                # 登录态（OAuth/cookie，运行时生成，gitignore）
-        ├── artifacts/            # 本地开发默认资产目录（生产由 WORK_DIR 指向使用方项目）
-        └── src/qa_automation/    # server.py / config.py / browser/ / components/
+        ├── fastmcp.json           # FastMCP 声明式服务器配置
+        ├── .env.example           # 环境变量模板（复制为 .env 后填写）
+        ├── accounts.json.example  # 多账号凭据模板（复制为 accounts.json 后填写）
+        ├── accounts.json          # 多账号凭据（运行时数据，gitignore）
+        ├── .auth/                 # 登录态（OAuth/cookie，运行时生成，gitignore）
+        ├── artifacts/             # 本地开发默认资产目录（生产由 WORK_DIR 指向使用方项目）
+        └── src/qa_automation/     # server.py / config.py / browser/ / components/
 ```
 
 ## 安装（Agent 平台）
@@ -33,26 +35,33 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 ## 配置
 
-所有环境相关的值一律通过配置文件注入，代码中不含业务域名硬编码。三个配置文件均**不上传真实内容**，仓库只提供模板：
+### 必填环境变量
 
-### 1. `.env`（必填）
-
-将 `mcp/qa-automation/.env.example` 复制为 `mcp/qa-automation/.env` 并填写。关键项：
+只有一个**必填**项：
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `SCM_BASE_URL` | **是** | 被测系统根地址（登录接口、验证码、工作台基于此拼接） |
-| `FASTMCP_LOG_LEVEL` / `FASTMCP_TRANSPORT` | 否 | 日志级别 / 传输方式（默认 stdio） |
-| `CDP_URL` | 否 | 浏览器接管端点（默认 `http://127.0.0.1:9222`） |
-| `VISUAL_CURSOR_ENABLED` | 否 | 虚拟光标/目标高亮默认开关 |
-| `PROJECT_DIR` | 否 | 服务私有数据根（accounts.json/.auth），默认 `mcp/qa-automation` |
-| `WORK_DIR` | 否 | **资产根**：截图/导出/下载/证据等生成文件保存到使用该插件的项目目录；由使用方注入（Agent 客户端环境变量或 mcp.json env），未配置回退 PROJECT_DIR |
+| `SCM_BASE_URL` | **是** | 被测系统根地址。登录接口、验证码接口、工作台页面均基于此拼接。**未配置时登录/验证码类工具会返回明确错误** |
 
-> 资产文件默认经 `mcp.json` 注入 `WORK_DIR=${PLUGIN_DATA}`（Agent Plugins 客户端管理的插件数据目录，§9.1）；若要保存到具体的用户项目目录，由使用方把 `WORK_DIR` 指向该项目即可。
+配置位置：`mcp/qa-automation/.env`（复制 `.env.example` 后填写）。
 
-### 2. `accounts.json`（可选，多账号）
+### 可选环境变量
 
-将 `mcp/qa-automation/accounts.json.example` 复制为 `mcp/qa-automation/accounts.json` 并填写。结构：
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CDP_URL` | `http://127.0.0.1:9222` | `browser_connect` 接管/自启的浏览器调试端点 |
+| `VISUAL_CURSOR_ENABLED` | `false` | 虚拟光标/目标高亮服务级默认开关 |
+| `PROJECT_DIR` | `mcp/qa-automation` | 服务私有数据根（accounts.json / .auth），一般无需修改 |
+| `WORK_DIR` | `${PLUGIN_DATA}`（mcp.json 注入） | **资产根**：截图/导出用例/下载/证据等生成文件的落盘目录，指向"使用该插件的项目目录" |
+| `DOWNLOAD_DIR` | `downloads` | `download_file` 默认保存目录（相对 WORK_DIR） |
+| `OUTPUT_DIR` | `output_testcases` | `export_session` 导出用例 JSON/Excel 目录（相对 WORK_DIR） |
+| `EVIDENCE_DIR` | `evidence_assets` | 证据/截图目录（相对 WORK_DIR） |
+| `FASTMCP_LOG_LEVEL` / `FASTMCP_TRANSPORT` | `INFO` / `stdio` | FastMCP 自身日志级别与传输方式 |
+| `ELEMENT_WAIT_TIMEOUT_MS` 等 | 见 `.env.example` | 时序/重试调优（慢环境整体放大） |
+
+### 多账号（可选）：`accounts.json`
+
+将 `mcp/qa-automation/accounts.json.example` 复制为 `mcp/qa-automation/accounts.json` 并填写：
 
 ```json
 {
@@ -63,20 +72,64 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 }
 ```
 
-也可在运行时用 `account_add` / `account_list` / `account_remove` 工具管理。文件已 gitignore，密码不返回给模型。
+也可运行时用 `account_add` / `account_list` / `account_remove` 工具管理。文件已 gitignore，密码不返回给模型。
 
-### 3. `.auth/`（运行时自动生成，无需手动配置）
+### 登录态：`.auth/`（自动生成，无需配置）
 
-`mcp/qa-automation/.auth/` 存放程序生成的**登录态**（OAuth token、cookie 快照，如 `session_save_state` 的落盘、Antigravity 视觉授权凭据）。该目录由工具自动写入/读取，**请勿手动编辑或提交**，已 gitignore。
+`mcp/qa-automation/.auth/` 由工具自动写入/读取（`session_save_state` 落盘、Antigravity 视觉授权凭据）。请勿手动编辑或提交。
 
-> **为什么 `accounts.json` 不放进 `.auth/`**：`accounts.json` 是用户维护的**输入配置**（账号/密码，静态、由人管理），`.auth/` 是程序产生的**运行状态**（会话/令牌，动态、由工具生成）。二者生命周期不同——清空登录态重登时不应误删账号配置，反之亦然——故保持分离（同处 `mcp/qa-automation/` 但分目录）。统一收纳会带来"清理状态连带删除配置"的风险。
+> `accounts.json` 与 `.auth/` 分目录但同处：前者是用户维护的**输入配置**（静态账号），后者是程序产生的**运行状态**（动态会话）。生命周期不同——清登录态重登不应误删账号配置——故保持分离。
 
-## 数据与资产分层
+### 数据与资产分层
 
 | 类别 | 位置 | 说明 |
 |---|---|---|
-| 凭据/登录态 | `mcp/qa-automation/`（accounts.json + .auth/） | 服务私有，固定在 MCP 项目目录，不随插件包或使用方项目变化 |
+| 凭据/登录态 | `mcp/qa-automation/`（accounts.json + .auth/） | 服务私有，固定在 MCP 项目目录 |
 | 生成资产 | `WORK_DIR`（默认 `${PLUGIN_DATA}`） | 截图/导出用例/下载/证据，保存到使用该插件的项目目录 |
+
+## 使用示例
+
+以下以一个真实场景说明：**对某 Web 系统（假设根地址 `https://scm.example.com`）的排产页面做一次 UI 自动化回归，产出用例与证据资产**。
+
+### 第 1 步：环境准备
+
+```bash
+# mcp/qa-automation/.env（必填）
+SCM_BASE_URL=https://scm.example.com
+
+# mcp/qa-automation/accounts.json（可选，多账号）
+{"base_url": "https://scm.example.com", "accounts": {"admin": {"username": "u_admin", "password": "***"}}}
+```
+
+浏览器以调试模式启动（`chrome --remote-debugging-port=9222`），或交给服务器自启。
+
+### 第 2 步：在 Agent 客户端中添加插件
+
+将 `https://github.com/hooplus1ce/hoolinks-plugin.git` 添加为插件。客户端完成握手后，插件暴露 46 个 MCP 工具与 2 个 Agent Skill。
+
+### 第 3 步：向 Agent 下达测试指令
+
+> 用户：请对 scm.example.com 的"排产计划"页面执行一次登录回归测试，记录证据，导出用例报表。
+
+### 第 4 步：Agent 自动编排的工具链（实际调用序列）
+
+1. `browser_connect`（mode=auto）——接管 9222 已打开的浏览器
+2. `session_create`（name="reg"）——建会话
+3. `login_with_captcha`（account="admin"）——从 accounts.json 取凭据 → 自动请求验证码 → OCR 识别 → 登录 → cookies 注入 → 跳转工作台
+4. `analyze_current_page`——解析页面元素与 iframe 路径，拿到语义定位信息
+5. `page_interact` / `vtable_read`——在排产表格上按行列取数断言（VTable canvas 场景）
+6. `session_save_state`——登录态落盘 `.auth/reg.json`，下次免验证码复用
+7. `export_session`——步骤级证据 JSON 落盘 `WORK_DIR/evidence_assets/`，Excel 用例报表落盘 `WORK_DIR/output_testcases/`
+
+### 第 5 步：产出物
+
+```
+<WORK_DIR>/evidence_assets/排产_回归/排产_回归_asset.json   # 步骤证据，可复用驱动下次回归
+<WORK_DIR>/output_testcases/排产_回归.xlsx                  # 可执行用例库/交付物
+<WORK_DIR>/artifacts/screenshots/…                         # 页面截图
+```
+
+下次回归直接复用 `evidence_assets` 中的定位器与步骤，无需重新录制。
 
 ## 本地开发
 
@@ -90,5 +143,5 @@ cd qa-automation && uv run fastmcp run fastmcp.json   # 直接启动（stdio）
 
 ## 安全边界
 
-- `.env`（真实密钥）、`accounts.json`（账号密码）、`.auth/`（登录态）、`artifacts/`（截图）均被 `.gitignore` 排除，仓库内无凭据
-- 登录接口路径/字段名等被测系统适配参数集中在 `src/qa_automation/browser/login.py` 的 `SCM_LOGIN_CONFIG`，不同系统按实际调整
+- `.env`（真实密钥）、`accounts.json`（账号密码）、`.auth/`（登录态）、`artifacts/`（截图）均被 `.gitignore` 排除，仓库内无凭据、无业务域名
+- 被测系统登录接口路径/字段名等适配参数集中在 `src/qa_automation/browser/login.py` 的 `SCM_LOGIN_CONFIG`，不同系统按实际调整

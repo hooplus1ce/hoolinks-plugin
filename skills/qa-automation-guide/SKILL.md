@@ -1,14 +1,14 @@
 ---
 name: qa-automation-guide
-description: 生和堂 APS 企业级 Web 自动化测试设计指南、食品行业用例矩阵设计、高韧性定位与 SOP 执行标准
+description: 企业级 APS Web 自动化测试设计指南、制造业用例矩阵设计、高韧性定位与 SOP 执行标准
 ---
 
-# 生和堂 APS 自动化测试与用例设计 SOP 指南
+# APS 自动化测试与用例设计 SOP 指南
 
-本技能为**生和堂 APS（高级计划排程）系统**定制。APS 是食品制造企业（龟苓膏、养生饮品、果汁系列）的多基地协同排产平台，对接金蝶 ERP、MES、WMS 等外部系统。本指南指导 AI Agent 开展全自动用例录制、动态 UI 组件适配、高韧性语义定位以及 Shadcn 极简风 Excel 报表导出。
+本技能为**企业级 APS（高级计划排程）系统**定制。APS 是制造企业的多基地协同排产平台，对接外部 ERP、MES、WMS 等系统。本指南指导 AI Agent 开展全自动用例录制、动态 UI 组件适配、高韧性语义定位以及 Shadcn 极简风 Excel 报表导出。
 
 > 被测系统画像（供每次会话前快速对齐）：
-> - 系统名称：生和堂 APS 智能排程；入口为工作台首页（左侧可折叠导航 + 标签页内容区）。
+> - 系统名称：APS 智能排程；入口为工作台首页（左侧可折叠导航 + 标签页内容区）。
 > - 数据来源：客户/物料/BOM 等主数据从金蝶 ERP 同步，APS 侧只读，同步数据不允许在 APS 修改。
 > - 食品行业约束：CCP 关键控制点、保质期批次、清洗改机时间损失、得率波动、配方保密（字段级权限）。
 > - 页面形态：Ant Design 门户弹层（Portal 挂载于 `<body>` 根节点）、多标签页 Tab 面板、表格为 VTable 场景图渲染。
@@ -54,7 +54,7 @@ description: 生和堂 APS 企业级 Web 自动化测试设计指南、食品行
 
 ## 2. 框架穿透与 UI 适配路由规则
 
-企业级 Web 系统交互复杂，必须动态选择适配器与 iframe 路径，避免易碎定位。生和堂 APS 为 React + Ant Design + VTable 技术栈：
+企业级 Web 系统交互复杂，必须动态选择适配器与 iframe 路径，避免易碎定位。被测 APS 为 React + Ant Design + VTable 技术栈：
 
 ### A. 嵌套 iframe 自动穿透
 - 始终分析 `analyze_current_page` 返回的 `frame_path` 链。
@@ -103,7 +103,7 @@ description: 生和堂 APS 企业级 Web 自动化测试设计指南、食品行
 
 1. **环境与 DOM 探查**：调起 `analyze_current_page` 截取 DOM、iframe 树及 UI 框架指纹；确认目标标签页与门户层结构。
 2. **用例矩阵规划**：按第 1 节 5 种模式打印 Markdown 格式的用例大纲（覆盖正向、边界与负向拦截场景），供用户确认。
-3. **开启会话**：用户确认后调起 `start_recording` 初始化内存会话缓冲，按 16 字段规范预填系统标识（`system_under_test: 生和堂APS`）与流程名。
+3. **开启会话**：用户确认后调起 `start_recording` 初始化内存会话缓冲，按 16 字段规范预填系统标识（`system_under_test: 被测APS`）与流程名。
 4. **高韧性交互录制**：按顺序调用 `execute_and_record` 或 `execute_action_chain` 执行动作，优先选用 Test ID、Label、Placeholder 或 ARIA Role 等面向用户的语义化定位器；表格断言走 `vtable_*` 工具；每次点击后依赖 `observe_after_click` 捕获动态层与消息反馈。
 5. **极美资产落盘**：调用 `export_session` 将 JSON 证据保存至 `evidence_assets/`，并将 Shadcn Slate 双色调极简 Excel 报表落盘至 `output_testcases/`；如需进入权威用例库，进一步用 `tob-testcase-generator` 技能按 16 字段规范生成 `testcase_json/` 资产并联动刷新 `testcase_xlsx/`。
 

@@ -30,7 +30,10 @@ async def test_scm_login_prompt_renders_guide(client: Client) -> None:
 
 
 async def test_scm_login_prompt_defaults(client: Client) -> None:
-    result = await client.get_prompt("scm-login", {})
+    # base_url 参数化：显式传入的地址必须进入指令文本（不依赖 .env 的 SCM_BASE_URL）
+    result = await client.get_prompt(
+        "scm-login", {"session": "scm", "base_url": "https://scm.example.com/static/admin"}
+    )
     text = result.messages[0].content.text
     assert '会话 "scm"' in text
-    assert "https://demo18-scm.hoolinks.com/static/admin" in text
+    assert "https://scm.example.com/static/admin" in text

@@ -145,7 +145,7 @@ async def test_captcha_login_rejected_vcode(mock_scm: str) -> None:
 
 
 async def test_captcha_login_scm_mode(mock_scm_json: str) -> None:
-    """SCM（demo18）模式：JSON body + userName/userPwd/vcode 字段 + ok 校验 + random 参数。"""
+    """SCM JSON 模式：JSON body + userName/userPwd/vcode 字段 + ok 校验 + random 参数。"""
     from qa_automation.browser.login import SCM_LOGIN_CONFIG
 
     cookies = await captcha_login(
@@ -174,7 +174,7 @@ async def test_captcha_login_scm_mode(mock_scm_json: str) -> None:
 
 
 async def test_captcha_login_real_scm_rejected() -> None:
-    """真实 demo18-scm 接口全链路（fake 账号）：验证码获取 + 字段/JSON 格式 + ok 校验。
+    """真实 SCM 接口全链路（fake 账号）：验证码获取 + 字段/JSON 格式 + ok 校验。
 
     预期被服务端拒绝（用户不存在）；SCM 不可达时跳过。
     """
@@ -182,7 +182,7 @@ async def test_captcha_login_real_scm_rejected() -> None:
 
     try:
         await captcha_login(
-            "https://demo18-scm.hoolinks.com",
+            "https://scm.example.com",
             "__probe__",
             "__probe__",
             _FakeOcr("0000"),
@@ -229,7 +229,7 @@ async def test_login_tool_missing_config(client: Client, monkeypatch) -> None:
 
 async def test_login_tool_account2_missing(client: Client, monkeypatch, tmp_path) -> None:
     """account 名在 accounts.json 不存在 → 明确报错。"""
-    monkeypatch.setenv("SCM_BASE_URL", "https://demo18-scm.hoolinks.com")
+    monkeypatch.setenv("SCM_BASE_URL", "https://scm.example.com")
     monkeypatch.setattr(
         "qa_automation.browser.accounts.ACCOUNTS_FILE", tmp_path / "accounts.json"
     )
