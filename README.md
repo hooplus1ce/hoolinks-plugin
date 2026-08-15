@@ -8,7 +8,7 @@
 
 ```
 ├── plugin.json          # Agent Plugins 1.0.0 插件清单（$schema + name + 元数据）
-├── mcp.json             # stdio MCP 服务器声明（直接运行 mcp/.venv 内 fastmcp.exe，零 uv 进程）
+├── mcp.json             # stdio MCP 服务器声明（uv run fastmcp run fastmcp.json --skip-env）
 ├── skills/              # 固定位置：Agent Skills（qa-automation-guide / ui-automation-test）
 ├── scripts/validate.py  # 插件一致性检查（零依赖）
 └── mcp/                 # uv workspace（多 MCP 项目共享一个 .venv）
@@ -42,7 +42,7 @@ cd mcp          # uv workspace 根
 uv sync         # 生成 mcp/.venv 并安装全部依赖（需已安装 uv）
 ```
 
-> 启动命令直接执行 `mcp/.venv` 内的 `fastmcp.exe`（**不经 uv，进程数最少**），因此**必须先完成①初始化**生成 `.venv`；未初始化时启动会失败，先执行 `cd mcp && uv sync`。
+> 启动命令为 `uv run fastmcp run fastmcp.json --skip-env`：外层 `uv run` 提供项目环境（未初始化时自动创建 `.venv`），`--skip-env` 让 fastmcp 复用该环境、**不再嵌套启动第二个 uv**（进程数最少化）。Scoop 安装的 uv 因 shim 机制会短暂显示两个 `uv.exe`，属正常。
 
 **② 配置环境变量**——**只有 `SCM_BASE_URL` 是必填**，其余全部可选：
 

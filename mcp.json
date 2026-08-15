@@ -3,8 +3,8 @@
   "mcpServers": {
     "qa-automation": {
       "type": "stdio",
-      "command": "./mcp/.venv/Scripts/fastmcp.exe",
-      "args": ["run", "fastmcp.json", "--skip-env"],
+      "command": "uv",
+      "args": ["run", "fastmcp", "run", "fastmcp.json", "--skip-env"],
       "cwd": "./mcp/qa-automation",
       "env": {
         "WORK_DIR": "${PLUGIN_DATA}"
