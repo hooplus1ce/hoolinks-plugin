@@ -9,6 +9,10 @@
       "env": {
         "WORK_DIR": "${PLUGIN_DATA}"
       }
+    },
+    "tencent-docs": {
+      "type": "streamable-http",
+      "url": "https://docs.qq.com/openapi/mcp"
     }
   }
 }
