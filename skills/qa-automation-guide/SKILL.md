@@ -108,4 +108,5 @@ description: 生和堂 APS 企业级 Web 自动化测试设计指南、食品行
 5. **极美资产落盘**：调用 `export_session` 将 JSON 证据保存至 `evidence_assets/`，并将 Shadcn Slate 双色调极简 Excel 报表落盘至 `output_testcases/`；如需进入权威用例库，进一步用 `tob-testcase-generator` 技能按 16 字段规范生成 `testcase_json/` 资产并联动刷新 `testcase_xlsx/`。
 
 ### 4.1 环境约定速查
-- 服务默认在 APS 项目根目录启动，使资产自然落入 `evidence_assets/` 与 `output_testcases/`。
+- 资产落盘根为 WORK_DIR（使用该插件的项目目录，由使用方注入；未配置回退服务项目目录），
+  `evidence_assets/` 与 `output_testcases/` 均相对 WORK_DIR 解析。

@@ -8,14 +8,14 @@
 ├── plugin.json          # Agent Plugins 1.0.0 插件清单（$schema + name + 元数据）
 ├── mcp.json             # stdio MCP 服务器声明（uv run fastmcp run fastmcp.json）
 ├── skills/              # 固定位置：Agent Skills（qa-automation-guide / ui-automation-test）
-├── accounts.json.example# 多账号凭据模板（复制为 mcp/qa-automation/accounts.json 后填写）
 ├── scripts/validate.py  # 插件一致性检查（零依赖）
 └── mcp/                 # uv workspace（多 MCP 项目共享一个 .venv）
     └── qa-automation/   # 本项目 MCP 服务（FastMCP 3.x，Python >=3.14）
         ├── pyproject.toml / uv.lock / .python-version
         ├── fastmcp.json          # FastMCP 声明式服务器配置
         ├── .env.example          # 环境变量模板（复制为 .env 后填写）
-        ├── accounts.json         # 多账号凭据（运行时数据，gitignore，模板见根 accounts.json.example）
+        ├── accounts.json.example # 多账号凭据模板（复制为 accounts.json 后填写）
+        ├── accounts.json         # 多账号凭据（运行时数据，gitignore）
         ├── .auth/                # 登录态（OAuth/cookie，运行时生成，gitignore）
         ├── artifacts/            # 本地开发默认资产目录（生产由 WORK_DIR 指向使用方项目）
         └── src/qa_automation/    # server.py / config.py / browser/ / components/
@@ -52,7 +52,7 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 ### 2. `accounts.json`（可选，多账号）
 
-将 `accounts.json.example` 复制为 `mcp/qa-automation/accounts.json` 并填写。结构：
+将 `mcp/qa-automation/accounts.json.example` 复制为 `mcp/qa-automation/accounts.json` 并填写。结构：
 
 ```json
 {

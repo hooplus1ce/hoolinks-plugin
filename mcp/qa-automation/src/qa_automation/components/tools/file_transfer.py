@@ -91,7 +91,7 @@ async def _retry_locator_action(label: str, fn) -> Any:
     title="File: Download",
     description="点击触发下载的按钮/链接，经 CDP 将下载文件重定向保存到指定目录并验证落盘；"
     "xlsx 文件自动读取预览（openpyxl），供导出报表断言。定位参数同 page_interact："
-    "role/name/text/css/xpath 任选其一。download_dir 默认 downloads（相对项目根，可 DOWNLOAD_DIR 覆盖）；"
+    "role/name/text/css/xpath 任选其一。download_dir 默认 downloads（相对 WORK_DIR，可 DOWNLOAD_DIR 覆盖）；"
     "filename 可指定保存名（同名覆盖）；read_preview=True 时对 xlsx/xlsm 返回内容预览。",
     icons=[_TRANSFER_ICON],
     tags={"browser", "file", "download"},
