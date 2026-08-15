@@ -4,7 +4,7 @@
     "qa-automation": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "fastmcp", "run", "fastmcp.json"],
+      "args": ["run", "fastmcp", "run", "fastmcp.json", "--skip-env"],
       "cwd": "./mcp/qa-automation",
       "env": {
         "WORK_DIR": "${PLUGIN_DATA}"
