@@ -76,7 +76,9 @@ https://github.com/hooplus1ce/hoolinks-plugin.git
 
 ### 登录态：`.auth/`（自动生成，无需配置）
 
-`mcp/qa-automation/.auth/` 由工具自动写入/读取（`session_save_state` 落盘、Antigravity 视觉授权凭据）。请勿手动编辑或提交。
+`mcp/qa-automation/.auth/` 由工具自动写入/读取（`session_save_state` 落盘等会话登录态）。请勿手动编辑或提交。
+
+> Antigravity 视觉识别的 OAuth 凭据**不在 `.auth/`**：默认存于用户主目录 `~/.qa-automation-plugin/antigravity-credentials.json`（可用 `ANTIGRAVITY_CREDENTIALS_FILE` 覆盖路径），client 凭证（`ANTIGRAVITY_CLIENT_ID`/`ANTIGRAVITY_CLIENT_SECRET`）读取自 `~/.qa-automation-plugin/.env`。
 
 > `accounts.json` 与 `.auth/` 分目录但同处：前者是用户维护的**输入配置**（静态账号），后者是程序产生的**运行状态**（动态会话）。生命周期不同——清登录态重登不应误删账号配置——故保持分离。
 
@@ -117,7 +119,7 @@ SCM_BASE_URL=https://scm.example.com
 2. `session_create`（name="reg"）——建会话
 3. `login_with_captcha`（account="admin"）——从 accounts.json 取凭据 → 自动请求验证码 → OCR 识别 → 登录 → cookies 注入 → 跳转工作台
 4. `analyze_current_page`——解析页面元素与 iframe 路径，拿到语义定位信息
-5. `page_interact` / `vtable_read`——在排产表格上按行列取数断言（VTable canvas 场景）
+5. `page_interact` / `vtable_get_cell_text` / `vtable_get_column_values`——在排产表格上按行/列取数断言（VTable canvas 场景）
 6. `session_save_state`——登录态落盘 `.auth/reg.json`，下次免验证码复用
 7. `export_session`——步骤级证据 JSON 落盘 `WORK_DIR/evidence_assets/`，Excel 用例报表落盘 `WORK_DIR/output_testcases/`
 
