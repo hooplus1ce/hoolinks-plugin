@@ -8,7 +8,7 @@
 
 ```
 ├── plugin.json          # Agent Plugins 1.0.0 插件清单（$schema + name + 元数据）
-├── mcp.json             # stdio MCP 服务器声明（uv run fastmcp run fastmcp.json）
+├── mcp.json             # stdio MCP 服务器声明（直接运行 mcp/.venv 内 fastmcp.exe，零 uv 进程）
 ├── skills/              # 固定位置：Agent Skills（qa-automation-guide / ui-automation-test）
 ├── scripts/validate.py  # 插件一致性检查（零依赖）
 └── mcp/                 # uv workspace（多 MCP 项目共享一个 .venv）
@@ -42,7 +42,7 @@ cd mcp          # uv workspace 根
 uv sync         # 生成 mcp/.venv 并安装全部依赖（需已安装 uv）
 ```
 
-> Agent 平台托管启动时，`mcp.json` 的 `uv run` 会在首次连接时自动完成环境准备（首次较慢属正常）；手动部署/开发请显式执行上面两步。
+> 启动命令直接执行 `mcp/.venv` 内的 `fastmcp.exe`（**不经 uv，进程数最少**），因此**必须先完成①初始化**生成 `.venv`；未初始化时启动会失败，先执行 `cd mcp && uv sync`。
 
 **② 配置环境变量**——**只有 `SCM_BASE_URL` 是必填**，其余全部可选：
 
