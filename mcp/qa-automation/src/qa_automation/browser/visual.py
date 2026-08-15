@@ -83,8 +83,9 @@ _INSTALL_JS = r"""
     mount();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const distance = Math.hypot(x - state.x, y - state.y);
-    // 与参考实现对齐并加深减速（MOVEMENT_SLOWDOWN=5），保证移动轨迹清晰可见
-    const duration = reduced ? 0 : Math.round(Math.min(1000, Math.max(280, (110 + Math.sqrt(distance) * 7) * 5)));
+    // 保留减速轨迹（系数 4）但收紧常数项与上限：原 (110+sqrt(d)*7)*5 令任意移动 ≥550ms，
+    // 近距离微调也在目标前长时间低速滑行，观感为"到达后停留"；现全距离 150-650ms
+    const duration = reduced ? 0 : Math.round(Math.min(650, Math.max(150, (60 + Math.sqrt(distance) * 5) * 4)));
     state.cursor?.classList.add('on');
     state.anim?.cancel();
     const from = { x: state.x, y: state.y };
