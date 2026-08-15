@@ -24,6 +24,10 @@ from qa_automation.browser.lifecycle import PlaywrightLifecycle
 from qa_automation.components.tools.analyze import _FOCUS_LAYER_JS
 from qa_automation.config import AUTH_DIR, PROJECT_ROOT, SCREENSHOT_DIR
 
+# 虚拟光标/目标高亮/点击波纹的保持可见时长（交互完成后才 clear 移除）。
+# 0.65s 太短看不清；调大让用户看清点击/输入位置。
+_VISUAL_KEEPALIVE_S = 1.5
+
 _ENV_LOADED = False
 
 
@@ -157,7 +161,7 @@ async def _do_fill_with_visual(
                 await VirtualCursor.click_at(
                     page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
                 )
-                await asyncio.sleep(0.65)
+                await asyncio.sleep(_VISUAL_KEEPALIVE_S)
             except Exception:  # noqa: BLE001
                 pass
         if input_method == "type":
@@ -788,7 +792,7 @@ async def page_interact(
             else:
                 return {"ok": False, "error": f"action {action!r} not supported in coordinate mode"}
             if visualize and action in ("click", "dblclick", "rightclick"):
-                await asyncio.sleep(0.65)  # 点击波纹可见后再消失（clear 在 finally）
+                await asyncio.sleep(_VISUAL_KEEPALIVE_S)  # 点击波纹可见后再消失（clear 在 finally）
             observation = await _observe_layers(page) if action in ("click", "dblclick", "rightclick", "hover") else None
             return {"ok": True, "mode": "coordinate", "x": x, "y": y, "action": action, "visualize": visualize, "observation": observation}
         except Exception as exc:
@@ -831,7 +835,7 @@ async def page_interact(
                     await VirtualCursor.click_at(
                         page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
                     )
-                    await asyncio.sleep(0.65)  # 点击波纹可见后再消失
+                    await asyncio.sleep(_VISUAL_KEEPALIVE_S)  # 点击波纹可见后再消失
                 observation = await _observe_layers(page)
                 return {
                     "ok": True,
@@ -905,7 +909,7 @@ async def page_interact(
                         box["x"] + box["width"] / 2,
                         box["y"] + box["height"] / 2,
                     )
-                    await asyncio.sleep(0.65)
+                    await asyncio.sleep(_VISUAL_KEEPALIVE_S)
                 except Exception:  # noqa: BLE001 - 波纹失败不影响结果
                     pass
         observation = (
