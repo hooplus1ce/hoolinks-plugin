@@ -1,0 +1,52 @@
+# 显式换行策略：仓库与工作区统一 LF（eol=lf 覆盖 autocrlf 检出转换，含 Windows），
+# 二进制不转换；仅 Windows 原生脚本强制 CRLF（cmd 对 LF 处理不稳）。
+# 本仓库已设 core.autocrlf=false：换行完全由 .gitattributes 管理（推荐组合）。
+
+* text=auto
+
+# --- 文本：统一 LF ---
+*.py        text eol=lf
+*.js        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.env       text eol=lf
+*.sh        text eol=lf
+*.sql       text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.svg       text eol=lf
+*.xml       text eol=lf
+
+# --- Windows 原生脚本：CRLF ---
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# --- 二进制：不转换 ---
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.webp      binary
+*.pdf       binary
+*.xlsx      binary
+*.docx      binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.bin       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.eot       binary
