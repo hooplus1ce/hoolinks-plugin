@@ -233,18 +233,32 @@ async def _click_option_in(dropdown, option_text: str) -> bool:
     return False
 
 
-async def _antd_select_option(page, frame, trigger_locator, option_text: str) -> None:
+async def _antd_select_option(
+    page, frame, trigger_locator, option_text: str, visualize: bool = False
+) -> None:
     """Ant Design Select 一步选择：click 展开 → 最新可见 dropdown → 按文本选 option。
 
     点击目标提升到 .ant-select 容器（antd 内部 input 常 opacity:0/pointer-events:none，
     点击 input 不展开）。连续下拉场景（挨个选下拉）存在动画竞态：上一个下拉的
     收起动画未结束前元素仍 :visible，.last 可能命中残留下拉。处理：找不到目标
     选项时，重新定位最新可见下拉重试，直至新下拉挂载（最多 4 次）。
+    visualize=True: 展开前对 .ant-select 容器做目标高亮（呼吸框）+ 光标移动。
     """
     container = trigger_locator.locator(
         "xpath=ancestor-or-self::*[contains(@class,'ant-select') "
         "or contains(@class,'ant-cascader') or contains(@class,'ant-tree-select')][1]"
     )
+    if visualize:
+        try:
+            from qa_automation.browser.visual import VirtualCursor
+
+            box = await container.bounding_box()
+            if box is not None:
+                await VirtualCursor.target(
+                    page, box["x"], box["y"], box["width"], box["height"]
+                )
+        except Exception:  # noqa: BLE001 - 特效失败不影响选择
+            pass
     await container.click()
     for attempt in range(4):
         dropdown = frame.locator(
@@ -945,6 +959,7 @@ async def page_click(
     text: str | None = None,
     css: str | None = None,
     timeout_ms: int = 30_000,
+    visualize: bool | None = None,
 ) -> dict:
     """点击元素。
 
@@ -955,14 +970,50 @@ async def page_click(
         text: 按可见文本定位。
         css: CSS 选择器（结构兜底，优先用语义定位）。
         timeout_ms: 等待超时（毫秒）。
+        visualize: 是否显示虚拟光标（移动/高亮/点击波纹）。缺省读 .env VISUAL_CURSOR_ENABLED。
     """
+    visualize = _visualize_default(visualize)
     lc = _lifecycle(ctx)
     try:
         page = await lc.page(session)
+        if visualize:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
+
+                await VirtualCursor.attach(page)
+            except Exception:  # noqa: BLE001 - 特效注入失败不影响交互
+                visualize = False
         locator = await _resolve_locator(
             page, role=role, name=name, text=text, css=css
         )
-        await locator.click(timeout=timeout_ms)
+        box = await locator.bounding_box()
+        if visualize and box is not None:
+            from qa_automation.browser.visual import VirtualCursor
+
+            # 目标高亮（呼吸框）+ 光标移动到元素中心
+            await VirtualCursor.target(page, box["x"], box["y"], box["width"], box["height"])
+        try:
+            await locator.click(timeout=timeout_ms)
+        except Exception:
+            # actionability 检查超时（遮挡/动画等）→ 元素中心坐标物理点击兜底
+            if box is None:
+                box = await locator.bounding_box()
+            if box is None:
+                raise
+            await page.mouse.click(
+                box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            )
+            if visualize:
+                await VirtualCursor.click_at(
+                    page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                )
+        if visualize:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
+
+                await VirtualCursor.clear(page)
+            except Exception:  # noqa: BLE001
+                pass
         return {"ok": True, "locator": {"role": role, "name": name, "text": text, "css": css}}
     except Exception as exc:
         return _err(exc)

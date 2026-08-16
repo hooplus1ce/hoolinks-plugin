@@ -29,6 +29,9 @@ build/
 # Test artifacts (screenshots etc.)
 artifacts/
 
+# Plugin runtime data dir (default PLUGIN_DATA)
+.plugin-data/
+
 # IDE
 .idea/
 .vscode/

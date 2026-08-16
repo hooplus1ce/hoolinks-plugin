@@ -108,12 +108,40 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
         if x is None or y is None:
             raise ValueError("coordinate mode requires both x and y")
         if action == "click":
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.click_at(page, x, y)
+                except Exception:  # noqa: BLE001 - 特效失败不影响交互
+                    pass
             await page.mouse.click(x, y)
         elif action == "dblclick":
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.click_at(page, x, y)
+                except Exception:  # noqa: BLE001
+                    pass
             await page.mouse.dblclick(x, y)
         elif action == "rightclick":
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.click_at(page, x, y)
+                except Exception:  # noqa: BLE001
+                    pass
             await page.mouse.click(x, y, button="right")
         elif action == "hover":
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.move_to(page, x, y)
+                except Exception:  # noqa: BLE001
+                    pass
             await page.mouse.move(x, y)
         else:
             raise ValueError(f"action {action!r} not supported in coordinate mode")
@@ -130,17 +158,71 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
     )
     if action == "click":
         try:
+            box = await locator.bounding_box()
+            if visualize and box is not None:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    # 目标高亮（呼吸框）+ 光标移动到元素中心
+                    await VirtualCursor.target(
+                        page, box["x"], box["y"], box["width"], box["height"]
+                    )
+                except Exception:  # noqa: BLE001 - 特效失败不影响交互
+                    pass
             await locator.click(timeout=min(int(act.get("timeout_ms", 30_000)), 5000))
         except Exception:
             box = await locator.bounding_box()
             if box is None:
                 raise
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.click_at(
+                        page,
+                        box["x"] + box["width"] / 2,
+                        box["y"] + box["height"] / 2,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     elif action == "dblclick":
+        box = await locator.bounding_box()
+        if visualize and box is not None:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
+
+                await VirtualCursor.target(
+                    page, box["x"], box["y"], box["width"], box["height"]
+                )
+            except Exception:  # noqa: BLE001
+                pass
         await locator.dblclick()
     elif action == "rightclick":
+        box = await locator.bounding_box()
+        if visualize and box is not None:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
+
+                await VirtualCursor.target(
+                    page, box["x"], box["y"], box["width"], box["height"]
+                )
+            except Exception:  # noqa: BLE001
+                pass
         await locator.click(button="right")
     elif action == "hover":
+        box = await locator.bounding_box()
+        if visualize and box is not None:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
+
+                await VirtualCursor.move_to(
+                    page,
+                    box["x"] + box["width"] / 2,
+                    box["y"] + box["height"] / 2,
+                )
+            except Exception:  # noqa: BLE001
+                pass
         await locator.hover()
     elif action == "fill":
         if act.get("value") is None:
@@ -171,7 +253,9 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
             "el => !!el.closest('.ant-select, .ant-cascader, .ant-tree-select')"
         )
         if is_antd:
-            await _antd_select_option(page, frame, locator, str(act.get("value", "")))
+            await _antd_select_option(
+                page, frame, locator, str(act.get("value", "")), visualize=visualize
+            )
         else:
             await locator.select_option(str(act.get("value", "")))
     elif action == "press":
