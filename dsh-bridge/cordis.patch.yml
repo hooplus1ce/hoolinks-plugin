@@ -1,0 +1,7 @@
+# hoolinks-dsh-bridge: inserts the bridge row into the profile's host layer.
+# The row resolves package 'hoolinks-dsh-bridge', whose apply() launches the
+# FastMCP stdio server declared in the repo mcp.json and registers its tools
+# and skills globally (visible to every session, survives restart).
+- insert:
+    - id: hoolinks-bridge
+      name: 'hoolinks-dsh-bridge'

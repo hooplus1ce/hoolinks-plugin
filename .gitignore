@@ -28,6 +28,12 @@ build/
 
 # Test artifacts (screenshots etc.)
 artifacts/
+downloads/
+evidence_assets/
+test_export/
+*.log
+nul
+*${PLUGIN_DATA}*
 
 # Plugin runtime data dir (default PLUGIN_DATA)
 .plugin-data/

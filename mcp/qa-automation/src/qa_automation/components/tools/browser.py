@@ -107,14 +107,62 @@ async def _detect_focus_layer(page) -> dict | None:
     return None
 
 
-async def _observe_layers(page) -> dict | None:
-    """交互后观察浮层/弹窗/消息（antd portal），轮询最长 3s，供 QA 断言。"""
-    for _ in range(3):
-        await asyncio.sleep(1.0)
+async def _active_iframe_snapshot(page) -> tuple[dict | None, str | None]:
+    """激活 tabpanel iframe 的 (信息, 稳定 key)；无 iframe 返回 (None, None)。"""
+    frame = await _active_iframe_frame(page)
+    if frame is None:
+        return None, None
+    info: dict = {}
+    try:
+        iframe_loc = page.locator(
+            '.ant-tabs-tabpane[role="tabpanel"][aria-hidden="false"] iframe'
+        )
+        fe = iframe_loc.first
+        info = {
+            "id": (await fe.get_attribute("id")) or "",
+            "name": (await fe.get_attribute("name")) or "",
+            "src": (await fe.get_attribute("src")) or "",
+        }
+    except Exception:  # noqa: BLE001
+        info = {"id": "", "name": frame.name or "", "src": frame.url or ""}
+    key = "|".join(v for v in info.values() if v) or "iframe"
+    return info, key
+
+
+async def _observe_layers(
+    page, before_url: str | None = None, before_iframe: str | None = None
+) -> dict:
+    """交互后观察页面状态：弹层/浮层/消息 + 激活 iframe + URL 跳转。
+
+    先立即检测一次（点击已有结果时零等待返回），再以 1s 间隔轮询最长 3s，
+    捕捉动画延迟出现的弹层/跳转。返回
+    {layer, iframe, url, url_changed, iframe_changed}；
+    窗口内无变化时返回最后一次快照（含当前 url/iframe 现状，供调用方比对）。
+    """
+    last: dict | None = None
+    for i in range(4):
+        if i:
+            await asyncio.sleep(1.0)
         layer = await _detect_focus_layer(page)
-        if layer:
-            return layer
-    return None
+        iframe_info, iframe_key = await _active_iframe_snapshot(page)
+        url = page.url
+        entry = {
+            "layer": layer,
+            "iframe": iframe_info,
+            "url": url,
+            "url_changed": before_url is not None and url != before_url,
+            "iframe_changed": before_iframe is not None and iframe_key != before_iframe,
+        }
+        if layer or entry["url_changed"] or entry["iframe_changed"]:
+            return entry
+        last = entry
+    return last or {
+        "layer": None,
+        "iframe": None,
+        "url": page.url,
+        "url_changed": False,
+        "iframe_changed": False,
+    }
 
 
 async def _do_fill_with_visual(
@@ -137,7 +185,7 @@ async def _do_fill_with_visual(
     box = None
     if visualize:
         try:
-            box = await locator.bounding_box()
+            box = await locator.bounding_box(timeout=1000)
             if box is not None:
                 from qa_automation.browser.visual import VirtualCursor
 
@@ -148,7 +196,10 @@ async def _do_fill_with_visual(
         except Exception:  # noqa: BLE001 - 特效注入失败不影响输入
             pass
     try:
-        await locator.click()  # 先点击聚焦（触发组件的 focus 逻辑）
+        try:
+            await locator.click(timeout=1500)  # 先点击聚焦（触发组件的 focus 逻辑）
+        except Exception:  # noqa: BLE001 - 元素已处于编辑聚焦态时容错
+            pass
         if visualize and box is not None:
             try:
                 from qa_automation.browser.visual import VirtualCursor
@@ -162,17 +213,23 @@ async def _do_fill_with_visual(
                 pass
         if input_method == "type":
             if clear_first:
-                await locator.press("Control+A")
-                await locator.press("Backspace")
+                try:
+                    await locator.press("Control+A", timeout=1000)
+                    await locator.press("Backspace", timeout=1000)
+                except Exception:  # noqa: BLE001
+                    pass
             if value:
                 try:
-                    await locator.press_sequentially(value, delay=100)
-                except AttributeError:
-                    await page.keyboard.type(value, delay=100)
+                    await locator.press_sequentially(value, delay=50, timeout=2000)
+                except Exception:  # noqa: BLE001
+                    await page.keyboard.type(value, delay=50)
         else:
-            await locator.fill(value)
+            await locator.fill(value, timeout=2000)
         if press_enter:
-            await locator.press("Enter")
+            try:
+                await locator.press("Enter", timeout=1000)
+            except Exception:  # noqa: BLE001 - 输入框被 VTable 销毁时键盘兜底
+                await page.keyboard.press("Enter")
     finally:
         # 输入完成（含异常路径）：特效从 DOM 移除
         if visualize:
@@ -203,7 +260,8 @@ async def _click_option_in(dropdown, option_text: str) -> bool:
         ".ant-select-item-option, "
         ".ant-select-dropdown-menu-item, "
         ".ant-select-tree-treenode, "
-        ".ant-cascader-menu-item"
+        ".ant-cascader-menu-item, "
+        ".virtual-option"
     )
     if await candidates.count() == 0:
         return False
@@ -314,10 +372,25 @@ async def _resolve_locator(
             "provide exactly one locator dimension (role/text/placeholder/xpath/css)"
         )
 
-    def build(target):
+    async def build(target):
         if role is not None:
             if name:
-                return target.get_by_role(role, name=name, exact=False)
+                loc = target.get_by_role(role, name=name, exact=False)
+                if role in ("option", "menuitem"):
+                    # 无显式 role 的虚拟选项（.virtual-option 等，analyze 标记为
+                    # role=option 但 get_by_role 匹配不到）→ 类选择器 + 文本过滤兜底
+                    try:
+                        if await loc.count() == 0:
+                            virt = target.locator(
+                                ".virtual-option, .ant-select-item-option, "
+                                ".ant-select-dropdown-menu-item, "
+                                ".ant-select-tree-treenode, .ant-cascader-menu-item"
+                            ).filter(has_text=name)
+                            if await virt.count() > 0:
+                                return virt
+                    except Exception:  # noqa: BLE001
+                        pass
+                return loc
             return target.get_by_role(role)
         if text is not None:
             return target.get_by_text(text, exact=False)
@@ -327,14 +400,14 @@ async def _resolve_locator(
             return target.locator(f"xpath={xpath}")
         return target.locator(css)
 
-    locator = build(page)
+    locator = await build(page)
     if await locator.count() > 0:
         return (locator, page) if return_frame else locator
     # 顶层未命中 → 激活 iframe 内查找
     if in_iframe:
         frame = await _active_iframe_frame(page)
         if frame is not None:
-            frame_locator = build(frame)
+            frame_locator = await build(frame)
             if await frame_locator.count() > 0:
                 return (frame_locator, frame) if return_frame else frame_locator
     return (locator, page) if return_frame else locator
@@ -419,7 +492,8 @@ async def browser_disconnect(ctx: Context) -> dict:
 @tool(
     title="Session: Open Isolated Window",
     description="创建隔离会话（无痕窗口）：cookie/session 与主浏览器完全隔离，可多账号同时在线互不干扰。"
-    "默认以 100% 全屏打开窗口；可选传入 account（accounts.json 账号名）直接登录。"
+    "默认以窗口最大化打开（人工点击右上角最大化按钮效果，保留系统标题栏与任务栏，页面内容铺满视口无留白）；"
+    "可选传入 account（accounts.json 账号名）直接登录。"
     "窗口归属本服务管理，disconnect 时关闭；不影响主浏览器窗口。",
     icons=[_BROWSER_ICON],
     tags={"browser", "session", "isolation"},
@@ -428,7 +502,8 @@ async def session_open_isolated(
     ctx: Context,
     name: str,
     account: str = "",
-    fullscreen: bool = True,
+    maximized: bool = True,
+    fullscreen: bool | None = None,
     username: str | None = None,
     password: str | None = None,
 ) -> dict:
@@ -437,7 +512,8 @@ async def session_open_isolated(
     Args:
         name: 会话名。
         account: accounts.json 账号名（提供则直接登录）。
-        fullscreen: 是否 100% 全屏打开窗口（默认 true）。
+        maximized: 是否最大化打开窗口（默认 true，右上角最大化按钮效果，页面铺满视口无留白）。
+        fullscreen: 是否 F11 全屏模式（默认 None；显式设为 True 时进入全屏）。
         username/password: 显式凭据（account 为空时使用）。
     """
     from qa_automation.browser import accounts
@@ -454,16 +530,16 @@ async def session_open_isolated(
         return _err(exc)
     await ctx.info(f"isolated window opened: {name} (cookie-isolated context)")
 
-    if fullscreen:
+    target_state = "fullscreen" if fullscreen is True else ("maximized" if (maximized and fullscreen is not False) else None)
+    if target_state:
         try:
-            await lc.set_session_window_state(name, "fullscreen")
+            await lc.set_session_window_state(name, target_state)
         except Exception as exc:
             await lc.close_session(name)
             return {
                 "ok": False,
-                "error": f"session created but fullscreen failed: {type(exc).__name__}: {exc}",
+                "error": f"session created but window state {target_state} failed: {type(exc).__name__}: {exc}",
             }
-
     logged_in = False
     if account or (username and password):
         cfg = accounts.load_accounts()
@@ -477,7 +553,8 @@ async def session_open_isolated(
                 "ok": True,
                 "name": name,
                 "isolated": True,
-                "fullscreen": fullscreen,
+                "maximized": maximized,
+                "fullscreen": fullscreen is True,
                 "warning": f"account {account!r} not found; window opened without login",
             }
         try:
@@ -490,7 +567,8 @@ async def session_open_isolated(
                 "ok": True,
                 "name": name,
                 "isolated": True,
-                "fullscreen": fullscreen,
+                "maximized": maximized,
+                "fullscreen": fullscreen is True,
                 "warning": f"window opened but login failed: {type(exc).__name__}: {exc}",
             }
 
@@ -498,7 +576,8 @@ async def session_open_isolated(
         "ok": True,
         "name": name,
         "isolated": True,
-        "fullscreen": fullscreen,
+        "maximized": maximized,
+        "fullscreen": fullscreen is True,
         "logged_in": logged_in,
         "account": account or None,
     }
@@ -715,7 +794,7 @@ async def tab_switch(
 @tool(
     title="Page: Interact (通用交互)",
     description="通用元素交互：支持语义定位（role/name、text、placeholder）、xpath、css 与视口坐标点击。"
-    "定位信息优先取自 analyze_current_page 输出（gbr/css/xpath/x/y）。坐标模式不做任何坐标计算，"
+    "定位信息优先取自 analyze_current_page 输出（gbr/css/x/y）。坐标模式不做任何坐标计算，"
     "直接使用传入的 x/y（视口绝对坐标）。in_iframe 控制是否在激活 iframe 内查找（默认 true）。"
     "select 动作自动识别 Ant Design 下拉（.ant-select）：点击展开→按下拉选项文本选中；"
     "原生 <select> 走 Playwright select_option。",
@@ -740,7 +819,7 @@ async def page_interact(
     press_enter: bool = False,
     in_iframe: bool = True,
     visualize: bool | None = None,
-    timeout_ms: int = 30_000,
+    timeout_ms: int = 3_000,
 ) -> dict:
     """通用交互（一次调用完成定位+动作）。
 
@@ -750,7 +829,7 @@ async def page_interact(
         role/name: 语义定位（get_by_role；name 取 analyze_current_page 返回的真实值，如"新 增"）。
         text: 按可见文本定位。
         placeholder: 按占位符定位。
-        css/xpath: 结构定位（xpath 用 analyze 返回的 xpath）。
+        css/xpath: 结构定位（xpath 为 XPath 表达式，结构兜底）。
         x/y: 视口绝对坐标（坐标模式，与定位参数互斥；工具不做坐标计算，直接使用）。
         value: fill/select/press 的输入值。
         input_method: fill=Playwright 原生填充（快稳，自动清空）; type=逐字模拟打字
@@ -759,7 +838,7 @@ async def page_interact(
         press_enter: 输入完成后按回车（搜索框/确认输入场景）。
         in_iframe: 是否在激活 iframe 内查找（默认 true；false 仅搜顶层）。
         visualize: 是否显示虚拟光标（移动/高亮/点击波纹）。缺省读 .env VISUAL_CURSOR_ENABLED。
-        timeout_ms: 等待超时（毫秒）。
+        timeout_ms: 等待超时（毫秒，默认 3000）。
     """
     from qa_automation.browser.visual import VirtualCursor
 
@@ -769,6 +848,10 @@ async def page_interact(
         page = await lc.page(session)
     except Exception as exc:
         return _err(exc)
+
+    # 交互前基线：URL 与激活 iframe（供点击后观察比对弹层/跳转/iframe 变化）
+    before_url = page.url
+    _, before_iframe = await _active_iframe_snapshot(page)
 
     if visualize:
         try:
@@ -803,7 +886,7 @@ async def page_interact(
                 return {"ok": False, "error": f"action {action!r} not supported in coordinate mode"}
             if visualize and action in ("click", "dblclick", "rightclick"):
                 await VirtualCursor.clear(page)  # 点击完成立即清除视效（finally 幂等兜底）
-            observation = await _observe_layers(page) if action in ("click", "dblclick", "rightclick", "hover") else None
+            observation = await _observe_layers(page, before_url, before_iframe) if action in ("click", "dblclick", "rightclick", "hover") else None
             return {"ok": True, "mode": "coordinate", "x": x, "y": y, "action": action, "visualize": visualize, "observation": observation}
         except Exception as exc:
             return _err(exc)
@@ -823,15 +906,18 @@ async def page_interact(
             in_iframe=in_iframe,
         )
         if action == "click":
-            box = await locator.bounding_box()
+            try:
+                box = await locator.bounding_box(timeout=1000)
+            except Exception:  # noqa: BLE001
+                box = None
             if visualize and box is not None:
                 # 目标高亮（呼吸框）+ 光标移动到元素中心
                 await VirtualCursor.target(
                     page, box["x"], box["y"], box["width"], box["height"]
                 )
             try:
-                # 快速尝试：元素 5s 内出现且可交互则正常点击；否则降级坐标兜底
-                await locator.click(timeout=min(timeout_ms, 5000))
+                # 快速尝试：元素在 timeout_ms 内可交互则正常点击；否则降级坐标兜底
+                await locator.click(timeout=timeout_ms)
             except Exception:
                 # actionability 检查超时（遮挡/动画等）→ 元素中心坐标物理点击兜底
                 if box is None:
@@ -846,7 +932,7 @@ async def page_interact(
                         page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
                     )
                     await VirtualCursor.clear(page)  # 点击完成立即清除视效
-                observation = await _observe_layers(page)
+                observation = await _observe_layers(page, before_url, before_iframe)
                 return {
                     "ok": True,
                     "mode": "locator",
@@ -911,7 +997,11 @@ async def page_interact(
             return {"ok": False, "error": f"unknown action {action!r}"}
         # 点击类动作：点击反馈波纹 → 点击完成立即清除（finally 幂等兜底）
         if visualize and action in ("click", "dblclick", "rightclick"):
-            box = await locator.bounding_box()
+            if box is None:
+                try:
+                    box = await locator.bounding_box(timeout=500)
+                except Exception:
+                    pass
             if box is not None:
                 try:
                     await VirtualCursor.click_at(
@@ -923,7 +1013,7 @@ async def page_interact(
                 except Exception:  # noqa: BLE001 - 波纹失败不影响结果
                     pass
         observation = (
-            await _observe_layers(page)
+            await _observe_layers(page, before_url, before_iframe)
             if action in ("click", "dblclick", "rightclick", "hover", "fill", "select", "press")
             else None
         )
@@ -958,7 +1048,7 @@ async def page_click(
     name: str | None = None,
     text: str | None = None,
     css: str | None = None,
-    timeout_ms: int = 30_000,
+    timeout_ms: int = 3_000,
     visualize: bool | None = None,
 ) -> dict:
     """点击元素。
@@ -969,13 +1059,20 @@ async def page_click(
         name: 可访问名（与 role 配合，如 role=button name=查询；子串匹配）。
         text: 按可见文本定位。
         css: CSS 选择器（结构兜底，优先用语义定位）。
-        timeout_ms: 等待超时（毫秒）。
+        timeout_ms: 等待超时（毫秒，默认 3000）。
         visualize: 是否显示虚拟光标（移动/高亮/点击波纹）。缺省读 .env VISUAL_CURSOR_ENABLED。
+
+    点击完成后自动快速观察（最长 3s，已有结果立即返回）：
+    observation.layer 弹层/浮层/消息、observation.iframe 激活 iframe、
+    observation.url / url_changed 页面跳转、iframe_changed iframe 变化。
     """
     visualize = _visualize_default(visualize)
     lc = _lifecycle(ctx)
     try:
         page = await lc.page(session)
+        # 交互前基线：URL 与激活 iframe（点击后观察比对弹层/跳转/iframe 变化）
+        before_url = page.url
+        _, before_iframe = await _active_iframe_snapshot(page)
         if visualize:
             try:
                 from qa_automation.browser.visual import VirtualCursor
@@ -986,7 +1083,10 @@ async def page_click(
         locator = await _resolve_locator(
             page, role=role, name=name, text=text, css=css
         )
-        box = await locator.bounding_box()
+        try:
+            box = await locator.bounding_box(timeout=1000)
+        except Exception:  # noqa: BLE001
+            box = None
         if visualize and box is not None:
             from qa_automation.browser.visual import VirtualCursor
 
@@ -1014,7 +1114,13 @@ async def page_click(
                 await VirtualCursor.clear(page)
             except Exception:  # noqa: BLE001
                 pass
-        return {"ok": True, "locator": {"role": role, "name": name, "text": text, "css": css}}
+        # 点击后立即快速观察：弹层/浮层/消息 + 激活 iframe + URL 跳转
+        observation = await _observe_layers(page, before_url, before_iframe)
+        return {
+            "ok": True,
+            "locator": {"role": role, "name": name, "text": text, "css": css},
+            "observation": observation,
+        }
     except Exception as exc:
         return _err(exc)
 
@@ -1059,6 +1165,9 @@ async def page_fill(
     page = None
     try:
         page = await lc.page(session)
+        # 交互前基线：URL 与激活 iframe（输入后观察比对）
+        before_url = page.url
+        _, before_iframe = await _active_iframe_snapshot(page)
         # 默认 role=textbox 仅在没有 placeholder/css 等结构维度时生效
         locator = await _resolve_locator(
             page,
@@ -1076,7 +1185,7 @@ async def page_fill(
             press_enter=press_enter,
             visualize=visualize,
         )
-        observation = await _observe_layers(page)
+        observation = await _observe_layers(page, before_url, before_iframe)
         return {
             "ok": True,
             "input_method": input_method,

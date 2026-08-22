@@ -87,8 +87,8 @@ async def test_analyze_current_page(client: Client, mock_page: str) -> None:
     assert "textbox" in by_role
     assert "combobox" in by_role
     add_btn = next(e for e in data["elements"] if e["name"] == "新 增")
-    # 定位信息齐全（语义定位首选 + 视口绝对坐标）
-    assert add_btn["css"] and add_btn["xpath"] and add_btn["gbr"]["role"] == "button"
+    # 定位信息齐全（语义定位首选 + 视口绝对坐标；xpath 不输出以降 token）
+    assert add_btn["css"] and add_btn["gbr"]["role"] == "button"
     # ref 全局编号 + input_type
     assert add_btn["ref"].startswith("e")
     # 视口绝对坐标（元素中心）= iframe 偏移(50,120) + iframe 内中心(45,25)
@@ -147,6 +147,44 @@ _MOCK_PAGE_MODAL = """<!doctype html><html><head><meta charset="utf-8"></head><b
 </body></html>"""
 
 
+_MOCK_PAGE_VTABLE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+<button id="bgBtn2" style="position:absolute;top:10px;left:10px;width:80px;height:30px">背景按钮2</button>
+<div class="vtable" style="position:absolute;top:100px;left:50px;width:600px;height:300px;">
+  <canvas id="vtCanvas" style="position:absolute;top:0;left:0;width:600px;height:300px;"></canvas>
+  <div class="vtable__menu-element vtable__menu-element--hidden" style="position:absolute;"></div>
+</div>
+<div class="vtable-filter-menu" style="position:absolute;left:278px;top:267px;width:300px;height:315px;">
+  <div><button style="width:80px;height:30px;">按值筛选</button><button style="width:80px;height:30px;">按条件筛选</button></div>
+  <div><input placeholder="可使用空格分隔多个关键词" style="width:200px;height:28px;"></div>
+  <div>
+    <div><label><input type="checkbox" style="width:14px;height:14px;">全选</label></div>
+    <div><label><input type="checkbox" style="width:14px;height:14px;">已审批</label></div>
+  </div>
+  <div><a href="#">清除筛选</a><button style="width:60px;height:30px;">取消</button><button style="width:60px;height:30px;">确认</button></div>
+</div>
+</body></html>"""
+
+
+_MOCK_PAGE_VTABLE_EDITOR = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+<button id="bgBtn3" style="position:absolute;top:10px;left:10px;width:80px;height:30px">背景按钮3</button>
+<div tabindex="0" class="vtable" style="outline:none;margin:0;position:absolute;top:100px;left:50px;width:600px;height:200px;">
+  <div data-vtable="vtable" class="input-container" style="opacity:0;pointer-events:none;"><input class="table-focus-control" readonly></div>
+  <canvas id="vtCanvas" style="position:absolute;top:0;left:0;width:600px;height:200px;"></canvas>
+  <div class="vtable__bubble-tooltip-element vtable__bubble-tooltip-element--hidden" style="left:143px;top:-4px;"><span>可编辑</span></div>
+  <input type="hidden" value="">
+  <input type="text" autocomplete="off" spellcheck="false" style="position:absolute;padding:4px 38px 4px 8px;width:203px;box-sizing:border-box;border:2px solid rgb(74,144,226);font-size:12px;top:21px;left:195px;height:26px;">
+  <div style="position:absolute;display:flex;align-items:center;justify-content:center;width:30px;z-index:1;pointer-events:auto;cursor:pointer;top:21px;left:368px;height:26px;"><i class="anticon anticon-search" style="cursor:pointer;color:rgb(16,142,233);"></i></div>
+  <div style="position:fixed;display:block;z-index:1000;background-color:rgb(255,255,255);border:1px solid rgb(217,217,217);border-radius:2px;box-shadow:rgba(0,0,0,0.15) 0px 2px 8px;overflow:hidden;top:342px;left:227px;width:203px;">
+    <div style="position:relative;width:100%;overflow:hidden auto;height:250px;">
+      <div class="virtual-option" style="padding:6px 12px;font-size:12px;cursor:pointer;position:absolute;top:0px;height:32px;box-sizing:border-box;">JK26A_152809</div>
+      <div class="virtual-option" style="padding:6px 12px;font-size:12px;cursor:pointer;position:absolute;top:32px;height:32px;box-sizing:border-box;">JK45B_152731</div>
+      <div class="virtual-option" style="padding:6px 12px;font-size:12px;cursor:pointer;position:absolute;top:64px;height:32px;box-sizing:border-box;">GT1_152729</div>
+    </div>
+  </div>
+</div>
+</body></html>"""
+
+
 class _MockPageGeneric(BaseHTTPRequestHandler):
     """按 path 返回不同 mock 页面。"""
 
@@ -155,6 +193,10 @@ class _MockPageGeneric(BaseHTTPRequestHandler):
             body = _MOCK_PAGE_TOP.encode()
         elif "/modal" in self.path:
             body = _MOCK_PAGE_MODAL.encode()
+        elif "/vtable-editor" in self.path:
+            body = _MOCK_PAGE_VTABLE_EDITOR.encode()
+        elif "/vtable" in self.path:
+            body = _MOCK_PAGE_VTABLE.encode()
         else:
             body = _MOCK_PAGE.encode()
         self.send_response(200)
@@ -203,6 +245,52 @@ async def test_analyze_modal_focus_trim(client: Client, mock_page: str) -> None:
     await client.call_tool("browser_disconnect", {})
 
 
+async def test_analyze_vtable_focus_trim(client: Client, mock_page: str) -> None:
+    """存在可见 VTable 自绘弹层（.vtable-filter-menu）时：聚焦弹层，裁剪背景。"""
+    sess = await _setup(client, mock_page, "/vtable")
+    r = await client.call_tool("analyze_current_page", {"session": sess})
+    assert r.data["ok"] is True, r.data
+    assert r.data["focus_layer"]["kind"] == "dropdown"
+    assert "vtable-filter-menu" in r.data["focus_layer"]["container"]
+    names = {e["name"] for e in r.data["elements"]}
+    # 弹层内元素（checkbox 由 label 包裹）
+    assert "确认" in names
+    assert "按值筛选" in names
+    # 背景元素被裁剪（聚焦弹层）—— canvas 兄弟菜单 hidden 不误报
+    assert "背景按钮2" not in names
+    assert all(e["frame"] == "layer" for e in r.data["elements"])
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_detect_overlays(client: Client, mock_page: str) -> None:
+    """detect_overlays：可见弹层 + 隐藏态常驻容器分类（modal/dropdown/vtable-filter）。"""
+    sess = await _setup(client, mock_page, "/vtable")
+    # 默认 include_hidden=False：只返回可见弹层
+    r = await client.call_tool("detect_overlays", {"session": sess})
+    assert r.data["ok"] is True, r.data
+    assert r.data["visible_count"] == 1
+    vl = r.data["visible_layers"][0]
+    assert vl["kind"] == "vtable-filter"
+    assert "vtable-filter-menu" in vl["container"]
+    assert vl["visible"] is True
+    # mock /vtable 页面弹层在顶层 body（无 iframe 包裹）→ scope=top
+    assert vl["scope"] == "top"
+    # 焦点弹层
+    assert r.data["focus_layer"]["kind"] == "vtable-filter"
+
+    # include_hidden=True：列出隐藏态常驻容器（modal/dropdown 等）
+    r2 = await client.call_tool(
+        "detect_overlays", {"session": sess, "include_hidden": True}
+    )
+    assert r2.data["ok"] is True, r2.data
+    kinds = {l["kind"] for l in r2.data["hidden_layers"]}
+    # mock 页面无 antd modal/select-dropdown，但 VTable 隐藏菜单应列出
+    assert any("vtable" in k for k in kinds)
+    # 可见层仍被正确标记
+    assert all(l["visible"] is False for l in r2.data["hidden_layers"])
+    await client.call_tool("browser_disconnect", {})
+
+
 async def test_page_interact_modes(client: Client, mock_page: str) -> None:
     """page_interact 通用交互：语义（空格名）/坐标（不计算直接用）/xpath/in_iframe 开关。"""
     r = await client.call_tool("browser_connect", {"mode": "launch", "headless": True})
@@ -225,11 +313,9 @@ async def test_page_interact_modes(client: Client, mock_page: str) -> None:
     assert r.data["ok"] is True, r.data
     assert r.data["mode"] == "coordinate"
 
-    # 3) xpath 模式（用 analyze 返回的 xpath）
-    r = await client.call_tool("analyze_current_page", {"session": "pi"})
-    btn = next(e for e in r.data["elements"] if e["name"] == "新 增")
+    # 3) xpath 模式（XPath 表达式定位 iframe 内按钮；analyze 不再输出 xpath）
     r = await client.call_tool(
-        "page_interact", {"session": "pi", "action": "click", "xpath": btn["xpath"]}
+        "page_interact", {"session": "pi", "action": "click", "xpath": "/html/body/button"}
     )
     assert r.data["ok"] is True, r.data
 
@@ -243,4 +329,106 @@ async def test_page_interact_modes(client: Client, mock_page: str) -> None:
     # 5) 坐标缺参报错
     r = await client.call_tool("page_interact", {"session": "pi", "action": "click", "x": 60})
     assert r.data["ok"] is False
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_detect_overlays_editor_dropdown(client: Client, mock_page: str) -> None:
+    """VTable 单元格编辑器下拉（无 class 面板 + .virtual-option 选项）被识别为可见弹层。"""
+    sess = await _setup(client, mock_page, "/vtable-editor")
+    r = await client.call_tool("detect_overlays", {"session": sess})
+    assert r.data["ok"] is True, r.data
+    kinds = {l["kind"] for l in r.data["visible_layers"]}
+    assert "vtable-editor-dropdown" in kinds
+    layer = next(
+        l for l in r.data["visible_layers"] if l["kind"] == "vtable-editor-dropdown"
+    )
+    assert layer["visible"] is True
+    assert layer["scope"] == "top"
+    # 选项文本进入摘要（可见选项可据此定位）
+    assert "JK26A_152809" in layer["text"]
+    assert "GT1_152729" in layer["text"]
+    # 焦点弹层优先指向编辑器下拉
+    assert r.data["focus_layer"]["kind"] == "vtable-editor-dropdown"
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_analyze_vtable_editor_focus(client: Client, mock_page: str) -> None:
+    """VTable 单元格编辑器下拉打开时：聚焦弹层，选项以 role=option 暴露（背景裁剪）。"""
+    sess = await _setup(client, mock_page, "/vtable-editor")
+    r = await client.call_tool("analyze_current_page", {"session": sess})
+    assert r.data["ok"] is True, r.data
+    assert r.data["focus_layer"]["kind"] == "dropdown"
+    # 无 class 面板 → 结构选择器 + nth 消歧（第 4 个 DIV 子节点 = 编辑器下拉面板）
+    assert r.data["focus_layer"]["container"] == "div.vtable > div >> nth=3"
+    names = {e["name"] for e in r.data["elements"]}
+    assert "JK26A_152809" in names
+    assert "JK45B_152731" in names
+    assert "GT1_152729" in names
+    opts = [e for e in r.data["elements"] if e["role"] == "option"]
+    assert len(opts) == 3
+    # 背景元素被裁剪（聚焦弹层），全部来自弹层
+    assert "背景按钮3" not in names
+    assert all(e["frame"] == "layer" for e in r.data["elements"])
+    # 视口坐标：fixed 面板 top=342 + 1px 边框 + 选项绝对偏移 + 高度一半
+    first = next(e for e in opts if e["name"] == "JK26A_152809")
+    assert first["y"] == 359.0
+    assert first["css"]
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_page_interact_virtual_option(client: Client, mock_page: str) -> None:
+    """单元格编辑器下拉选项可按 analyze 的 role=option + name 点击（无显式 role 兜底）。"""
+    sess = await _setup(client, mock_page, "/vtable-editor")
+    r = await client.call_tool(
+        "page_interact",
+        {"session": sess, "action": "click", "role": "option", "name": "JK45B_152731"},
+    )
+    assert r.data["ok"] is True, r.data
+    assert r.data["mode"] == "locator"
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_page_click_observes_editor_dropdown(client: Client, mock_page: str) -> None:
+    """page_click 点击后快速观察：编辑器下拉弹层进入 observation（零等待返回）。"""
+    sess = await _setup(client, mock_page, "/vtable-editor")
+    r = await client.call_tool(
+        "page_click", {"session": sess, "role": "option", "name": "JK45B_152731"}
+    )
+    assert r.data["ok"] is True, r.data
+    obs = r.data.get("observation")
+    assert obs is not None
+    assert obs["layer"]["kind"] == "dropdown"
+    assert obs["url_changed"] is False
+    assert obs["iframe"] is None  # mock 页面无激活 iframe
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_page_click_observes_navigation(client: Client, mock_page: str) -> None:
+    """page_click 点击链接后观察：URL 跳转被标记 url_changed=True。"""
+    sess = await _setup(client, mock_page, "/vtable")
+    r = await client.call_tool(
+        "page_click", {"session": sess, "css": "a:has-text('清除筛选')"}
+    )
+    assert r.data["ok"] is True, r.data
+    obs = r.data.get("observation")
+    assert obs is not None
+    assert obs["url_changed"] is True
+    assert obs["url"].endswith("#")
+    await client.call_tool("browser_disconnect", {})
+
+
+async def test_page_click_observes_iframe(client: Client, mock_page: str) -> None:
+    """page_click 点击 iframe 内元素后观察：激活 iframe 信息（id/name）进入 observation。"""
+    sess = await _setup(client, mock_page, "/")
+    r = await client.call_tool(
+        "page_click", {"session": sess, "role": "button", "name": "新 增"}
+    )
+    assert r.data["ok"] is True, r.data
+    obs = r.data.get("observation")
+    assert obs is not None
+    assert obs["iframe"] is not None
+    assert obs["iframe"]["name"] == "66250001"
+    assert obs["iframe"]["id"] == "react_iframe"
+    assert obs["url_changed"] is False
+    assert obs["iframe_changed"] is False
     await client.call_tool("browser_disconnect", {})

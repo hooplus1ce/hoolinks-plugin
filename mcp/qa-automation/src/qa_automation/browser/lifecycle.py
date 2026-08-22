@@ -96,25 +96,33 @@ class Session:
         接管激活标签页：document.visibilityState == 'visible' 即前台（用户当前
         正在看的标签页）；后台标签页为 hidden。避免在已有业务页时新建空白页。
         """
+        def _setup_timeout(p: Page) -> Page:
+            try:
+                self.context.set_default_timeout(3000)
+                p.set_default_timeout(3000)
+            except Exception:  # noqa: BLE001
+                pass
+            return p
+
         if self.page is not None and not self.page.is_closed():
-            return self.page
+            return _setup_timeout(self.page)
         for candidate in list(self.context.pages):
             if candidate.is_closed():
                 continue
             try:
                 if await candidate.evaluate("document.visibilityState") == "visible":
                     self.page = candidate
-                    return candidate
+                    return _setup_timeout(candidate)
             except Exception:  # noqa: BLE001 - 页面不可评估则跳过
                 continue
         # 无前台激活页 → 取第一个可用页面（不新建）
         for candidate in list(self.context.pages):
             if not candidate.is_closed():
                 self.page = candidate
-                return candidate
+                return _setup_timeout(candidate)
         # 上下文完全没有页面 → 新建
         self.page = await self.context.new_page()
-        return self.page
+        return _setup_timeout(self.page)
 
 
 class PlaywrightLifecycle:
@@ -286,12 +294,16 @@ class PlaywrightLifecycle:
         self._ensure_connected()
         if name in self._sessions:
             raise SessionError(f"session {name!r} already exists")
+        context_opts = dict(context_options)
+        if "no_viewport" not in context_opts and "viewport" not in context_opts:
+            context_opts["no_viewport"] = True
+
         if use_default:
             if self._mode == "launch":
                 # 自启浏览器：无"用户已打开窗口"；所有上下文均在可见浏览器窗口内，
                 # 按常规上下文创建（管理权归本管理器）
                 context = await self._browser.new_context(
-                    storage_state=storage_state, **context_options
+                    storage_state=storage_state, **context_opts
                 )
                 session = Session(name=name, context=context, managed=True, account=account)
             else:
@@ -307,7 +319,7 @@ class PlaywrightLifecycle:
                 )
         else:
             context = await self._browser.new_context(
-                storage_state=storage_state, **context_options
+                storage_state=storage_state, **context_opts
             )
             session = Session(name=name, context=context, managed=True, account=account)
         self._sessions[name] = session
@@ -368,12 +380,12 @@ class PlaywrightLifecycle:
         return self._session(name).context
 
     async def set_session_window_state(
-        self, name: str | None = None, window_state: str = "fullscreen"
+        self, name: str | None = None, window_state: str = "maximized"
     ) -> None:
         """设置会话页面所在窗口的状态（CDP Browser.setWindowBounds）。
 
         window_state: normal/maximized/minimized/fullscreen。
-        用于隔离上下文（无痕窗口）全屏展示。
+        默认 maximized（右上角最大化窗口，保留标题栏与系统任务栏，页面内容铺满视口）。
         """
         self._ensure_connected()
         session = self._session(name)

@@ -42,11 +42,13 @@ async def _vtable_host(ctx: Context, session: str | None) -> tuple:
     icons=[_VTABLE_ICON],
     tags={"vtable", "browser", "qa"},
 )
-async def vtable_refresh_instance(ctx: Context, session: str | None = None) -> dict:
-    """刷新并挂载最新 VTable 实例至 window._vtable。"""
+async def vtable_refresh_instance(
+    ctx: Context, table_index: int = 0, session: str | None = None
+) -> dict:
+    """刷新并挂载指定 VTable 实例（默认 index=0 第一个表格，多表格传对应 index）至 window._vtable。"""
     try:
         host, _ = await _vtable_host(ctx, session)
-        result = await vt.refresh_instance(host)
+        result = await vt.refresh_instance(host, table_index=table_index)
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
@@ -75,13 +77,13 @@ async def vtable_analyze_headers(ctx: Context, session: str | None = None) -> di
     tags={"vtable", "browser", "qa"},
 )
 async def vtable_scan_columns(
-    ctx: Context, session: str | None = None, max_col: int = 200
+    ctx: Context, table_index: int = 0, session: str | None = None, max_col: int = 200
 ) -> dict:
     """扫描 VTable 全部列（含多级表头）。"""
     try:
         host, _ = await _vtable_host(ctx, session)
-        columns = await vt.scan_columns(host, max_col)
-        return {"ok": True, "columns": columns}
+        columns = await vt.scan_columns(host, max_col, table_index=table_index)
+        return {"ok": True, "columns": columns, "table_index": table_index}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -108,12 +110,14 @@ async def vtable_get_row_count(ctx: Context, session: str | None = None) -> dict
     icons=[_VTABLE_ICON],
     tags={"vtable", "browser", "qa"},
 )
-async def vtable_get_all_records(ctx: Context, session: str | None = None) -> dict:
+async def vtable_get_all_records(
+    ctx: Context, table_index: int = 0, session: str | None = None
+) -> dict:
     """一次性读取表格所有后台完整记录对象。"""
     try:
         host, _ = await _vtable_host(ctx, session)
-        records = await vt.get_all_records(host)
-        return {"ok": True, "records": records}
+        records = await vt.get_all_records(host, table_index=table_index)
+        return {"ok": True, "records": records, "table_index": table_index}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -221,14 +225,15 @@ async def vtable_scroll_to(
     row_index: int | None = None,
     scroll_left: int | float | None = None,
     scroll_top: int | float | None = None,
+    table_index: int = 0,
     session: str | None = None,
     verify: bool = True,
 ) -> dict:
     """滚动 VTable 到目标位置。"""
     try:
-        host, _ = await _vtable_host(ctx, session)
+        host, page = await _vtable_host(ctx, session)
         result = await vt.scroll_to(
-            host, col_field, row_index, scroll_left, scroll_top, verify
+            host, col_field, row_index, scroll_left, scroll_top, page=page, verify=verify, table_index=table_index
         )
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001

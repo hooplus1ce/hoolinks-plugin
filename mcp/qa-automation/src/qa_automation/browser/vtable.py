@@ -118,23 +118,28 @@ async def _iframe_offset(host) -> dict:
     return {"left": 0.0, "top": 0.0}
 
 
-async def refresh_instance(host) -> dict:
+async def refresh_instance(host, table_index: int = 0) -> dict:
     """在指定 host 下寻址并刷新最新 vtable 实例至 window._vtable。
 
-    使用 vtable_scanner.js 的 mountVTable (含可见性检查 + React fiber 向上回溯)。
+    使用 vtable_scanner.js 的 mountVTable (支持多表格 index 切换)。
     """
-    result = await _run_vtable_js(host, """
-    (() => {
-        const m = mountVTable();
-        if (!m.ok) return { error: m.reason };
-        return { status: "success", levels: m.levels };
-    })()
-    """)
+    result = await _run_vtable_js(
+        host,
+        f"""
+    (() => {{
+        const m = mountVTable({int(table_index)});
+        if (!m.ok) return {{ error: m.reason }};
+        return {{ status: "success", levels: m.levels, index: m.index, total: m.total }};
+    }})()
+    """,
+    )
     if result.get("error"):
         raise RuntimeError(f"挂载 VTable 实例失败: {result.get('error')}")
     return {
         "status": "success",
-        "message": "最新 VTable 实例已成功抓取并挂载到 window._vtable",
+        "message": f"最新 VTable 实例（序号: {table_index}）已成功抓取并挂载到 window._vtable",
+        "table_index": result.get("index", 0),
+        "total_tables": result.get("total", 1),
     }
 
 
@@ -185,23 +190,73 @@ async def analyze_headers(
     return columns
 
 
-async def scan_columns(host, max_col: int = 200) -> List[dict]:
+async def scan_columns(host, max_col: int = 200, table_index: int = 0) -> List[dict]:
     """扫描 VTable 全部列 (含多级表头): 标题、body 行为分类、表头图标顶层视口坐标。"""
-    await refresh_instance(host)
+    await refresh_instance(host, table_index=table_index)
     result = await _run_vtable_js(host, f"""
     (() => {{
-        const m = mountVTable();
-        if (!m.ok) return {{ error: m.reason }};
+        const m = mountVTable({int(table_index)});
         const cols = scanColumns({int(max_col)});
-        if (!cols) return {{ error: "scanColumns 返回空" }};
-        return {{ ok: true, columns: cols }};
+        
+        function extractText(val) {{
+            if (!val) return '';
+            if (typeof val === 'string') return val.trim();
+            if (typeof val === 'number') return String(val);
+            if (typeof val === 'object') {{
+                if (val.props && val.props.children) return extractText(val.props.children);
+                if (Array.isArray(val)) return val.map(extractText).join('');
+                if (val.title) return extractText(val.title);
+                if (val.label) return extractText(val.label);
+            }}
+            return '';
+        }}
+        const foundColumns = [];
+        const allNodes = Array.from(document.querySelectorAll('*'));
+        for (const el of allNodes) {{
+            const fk = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+            if (!fk) continue;
+            let fiber = el[fk];
+            while (fiber) {{
+                const sn = fiber.stateNode;
+                const mp = fiber.memoizedProps;
+                const ms = fiber.memoizedState;
+                const allObjects = [
+                    sn, mp, ms,
+                    sn?.props, sn?.viewModel, sn?.store, sn?.viewStore,
+                    mp?.store, mp?.viewModel, mp?.viewStore,
+                    sn?.tableProps, mp?.tableProps
+                ];
+                for (const obj of allObjects) {{
+                    if (!obj || typeof obj !== 'object') continue;
+                    for (const k of Object.keys(obj)) {{
+                        const val = obj[k];
+                        if (Array.isArray(val) && val.length > 5 && val[0] && (val[0].title || val[0].dataIndex || val[0].headerName || val[0].field)) {{
+                            const list = val.map((c, i) => ({{
+                                col: i,
+                                title: extractText(c.title || c.label || c.caption || c.headerName || c.dataIndex || c.key || c.field),
+                                field: c.dataIndex || c.key || c.field || '',
+                                width: c.width,
+                                editable: !!c.editable || !!c.editor
+                            }})).filter(c => !!c.title);
+                            if (list.length > foundColumns.length || (k.toLowerCase().includes('sub') && list.length >= foundColumns.length)) {{
+                                foundColumns.splice(0, foundColumns.length, ...list);
+                            }}
+                        }}
+                    }}
+                }}
+                fiber = fiber.return;
+            }}
+        }}
+        
+        if (foundColumns.length > 0) {{
+            return {{ ok: true, columns: foundColumns }};
+        }}
+        return {{ ok: true, columns: cols || [] }};
     }})()
     """)
     if result.get("error"):
         raise RuntimeError(f"扫描 VTable 列失败: {result.get('error')}")
     return result.get("columns", [])
-
-
 async def get_column_values(host, titles: List[str], raw: bool = False) -> dict:
     """按中文列标题读取该列所有单元格的值。
 
@@ -290,6 +345,8 @@ async def scroll_to(
     row_index: Union[int, None] = None,
     scroll_left: Union[int, float, None] = None,
     scroll_top: Union[int, float, None] = None,
+    page=None,
+    table_index: int = 0,
     verify: bool = True,
 ) -> dict:
     """滚动 VTable 到目标位置 (等价于拖动横/纵向滚动条滑块)。
@@ -303,7 +360,7 @@ async def scroll_to(
     if all(v is None for v in (col_field, row_index, scroll_left, scroll_top)):
         raise RuntimeError("至少需要提供 col_field / row_index / scroll_left / scroll_top 之一")
 
-    await refresh_instance(host)
+    await refresh_instance(host, table_index=table_index)
 
     # 解析列索引
     col_idx = None
@@ -341,16 +398,53 @@ async def scroll_to(
     result = await _run_vtable_js(host, f"""
     (() => {{
         const t = window._vtable;
-        if (!t) return {{ error: 'window._vtable 未准备好' }};
-        const r = {call_expr};
+        let r = {{ ok: true }};
+        if (t) {{
+            r = {call_expr};
+            if (typeof t.render === 'function') t.render();
+        }}
+        // 同时滚动页面中所有横向溢出的表格容器 (DOM Table / Virtual Table)
+        const targetLeft = {float(scroll_left or 2000)};
+        const scrollEls = document.querySelectorAll('.ant-table-body, .ant-table-scroll, .ant-table-content, .ant-table-header, div.vtable, div[style*="overflow"]');
+        scrollEls.forEach(el => {{
+            if (el.scrollWidth > el.clientWidth + 5) {{
+                el.scrollLeft = targetLeft;
+            }}
+        }});
         return r;
     }})()
     """)
-    if result.get("error"):
-        raise RuntimeError(f"滚动 VTable 失败: {result.get('error')}")
-    if not result.get("ok"):
-        raise RuntimeError(f"滚动 VTable 失败: {result.get('reason')}")
-
+    # 真实鼠标拖拽 Canvas 底部滚动条滑块
+    if (scroll_left is not None or col_idx is not None) and page is not None:
+        try:
+            vt_el_rect = await _run_vtable_js(host, """
+            (() => {
+                const canvases = document.querySelectorAll('canvas');
+                const cv = canvases[1] || canvases[0];
+                if (!cv) return null;
+                const r = cv.getBoundingClientRect();
+                const ifr = window.frameElement ? window.frameElement.getBoundingClientRect() : { left: 0, top: 0 };
+                return {
+                    sb_y: ifr.top + r.top + r.height - 6,
+                    start_x: ifr.left + r.left + 120,
+                    end_x: ifr.left + r.left + r.width - 20
+                };
+            })()
+            """)
+            if vt_el_rect:
+                sb_y = vt_el_rect["sb_y"]
+                start_x = vt_el_rect["start_x"]
+                end_x = vt_el_rect["end_x"]
+                await page.mouse.move(start_x, sb_y)
+                await page.mouse.down()
+                for step in range(1, 26):
+                    cur_x = start_x + (end_x - start_x) * (step / 25)
+                    await page.mouse.move(cur_x, sb_y)
+                    await asyncio.sleep(0.02)
+                await page.mouse.up()
+                await asyncio.sleep(0.2)
+        except Exception:  # noqa: BLE001
+            pass
     if verify and col_idx is not None:
         body_row = int(row_index) + 1 if row_index is not None else 1
         await _poll_vtable(
@@ -426,35 +520,22 @@ async def get_row_count(host) -> int:
     return result.get("count", 0)
 
 
-async def get_all_records(host) -> List[dict]:
-    """一次性读取表格所有的后台完整记录对象。
-
-    优先从 vtable_aggregator.records 读取；若列配置中不存在该结构 (普通 VTable 数据表)，
-    则回退读取 vtable.records。
+async def get_all_records(host, table_index: int = 0) -> List[dict]:
+    """一次性读取表格中全部完整后台行记录（JSON）。"""
+    await refresh_instance(host, table_index=table_index)
+    get_records_js = f"""
+    () => {{
+        mountVTable({int(table_index)});
+        if (!window._vtable) return {{ error: "window._vtable 未准备好" }};
+        const t = window._vtable;
+        const recs = t.records || (t.options && t.options.records) || [];
+        return Array.isArray(recs) ? recs : [];
+    }}
     """
-    await refresh_instance(host)
-    get_records_js = """
-    () => {
-        if (!window._vtable) return { error: "window._vtable 未准备好" };
-        const vtable = window._vtable;
-        const columns = vtable.columns || (vtable.options && vtable.options.columns) || [];
-        for (let col of columns) {
-            if (col.vtable_aggregator && col.vtable_aggregator.records) {
-                return { status: "success", records: col.vtable_aggregator.records };
-            }
-        }
-        const records = vtable.records;
-        if (Array.isArray(records) && records.length > 0) {
-            return { status: "success", records: records };
-        }
-        return { error: "未能在 vtable 中读取到 records" };
-    }
-    """
-    result = await host.evaluate(get_records_js)
-    if result.get("error"):
-        raise RuntimeError(result.get("error"))
-    return result.get("records", [])
-
+    records = await _run_vtable_js(host, f"({get_records_js})()")
+    if isinstance(records, dict) and records.get("error"):
+        raise RuntimeError(f"读取行记录失败: {records.get('error')}")
+    return records if isinstance(records, list) else []
 
 async def get_cell_text(
     host, row_index: int, col_field: str, visual: bool = True

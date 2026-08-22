@@ -169,7 +169,7 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                     )
                 except Exception:  # noqa: BLE001 - 特效失败不影响交互
                     pass
-            await locator.click(timeout=min(int(act.get("timeout_ms", 30_000)), 5000))
+            await locator.click(timeout=int(act.get("timeout_ms", 3_000)))
         except Exception:
             box = await locator.bounding_box()
             if box is None:

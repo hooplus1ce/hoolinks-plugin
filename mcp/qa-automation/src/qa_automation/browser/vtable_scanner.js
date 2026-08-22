@@ -38,37 +38,59 @@ function findVisibleVTableElement() {
   return null;
 }
 
-function mountVTable() {
-  var el = findVisibleVTableElement();
-  if (!el || !el.parentElement) return { ok: false, reason: 'visible .vtable not found' };
-
-  var parent = el.parentElement;
-  var fk = Object.keys(parent).find(
-    function (k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'); }
-  );
-  if (!fk) {
-    var current = parent;
-    for (var i = 0; i < 5; i++) {
-      if (!current) break;
-      fk = Object.keys(current).find(
-        function (k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'); }
-      );
-      if (fk) { parent = current; break; }
-      current = current.parentElement;
+function mountVTable(index) {
+  var vtableEls = [].slice.call(document.querySelectorAll('.vtable, [class*="vtable"], [class*="Table"], .ant-table-wrapper'));
+  // 过滤出真正包含表格内容或 canvas 的容器
+  vtableEls = vtableEls.filter(function(el) {
+    return el.querySelector('canvas') || el.querySelector('table') || el.className.indexOf('vtable') !== -1;
+  });
+  var targetIdx = (typeof index === 'number') ? index : (typeof window._vtableIndex === 'number' ? window._vtableIndex : 0);
+  var targetEl = vtableEls[targetIdx] || vtableEls[0];
+  var nodesToTry = [targetEl.querySelector('canvas'), targetEl, targetEl.parentElement].filter(Boolean);
+  for (var ni = 0; ni < nodesToTry.length; ni++) {
+    var node = nodesToTry[ni];
+    var fk = Object.keys(node).find(function (k) {
+      return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance');
+    });
+    if (!fk) continue;
+    var fiber = node[fk];
+    for (var count = 0; fiber && count < 25; count++) {
+      if (fiber.stateNode) {
+        var sn = fiber.stateNode;
+        var cands = [sn.vtableInstance, sn.vtable, sn.tableInstance, sn.tableRef && sn.tableRef.current, sn.instance];
+        for (var ci = 0; ci < cands.length; ci++) {
+          var c = cands[ci];
+          if (c && typeof c.getCellValue === 'function' && c.scenegraph) {
+            window._vtable = c;
+            window._vtableElement = targetEl;
+            window._vtableIndex = targetIdx;
+            return { ok: true, index: targetIdx, levels: count, colCount: c.colCount, rowCount: c.rowCount };
+          }
+        }
+      }
+      if (fiber.memoizedState) {
+        var hook = fiber.memoizedState;
+        while (hook) {
+          var val = hook.memoizedState;
+          if (val) {
+            var hcands = [val, val.current, val.vtable, val.vtableInstance, val.tableInstance];
+            for (var hi = 0; hi < hcands.length; hi++) {
+              var hc = hcands[hi];
+              if (hc && typeof hc.getCellValue === 'function' && hc.scenegraph) {
+                window._vtable = hc;
+                window._vtableElement = targetEl;
+                window._vtableIndex = targetIdx;
+                return { ok: true, index: targetIdx, levels: count, colCount: hc.colCount, rowCount: hc.rowCount };
+              }
+            }
+          }
+          hook = hook.next;
+        }
+      }
+      fiber = fiber.return;
     }
   }
-  if (!fk) return { ok: false, reason: 'fiber key not found' };
-
-  var fiber = parent[fk];
-  for (var count = 0; fiber && count < 30; count++) {
-    if (fiber.stateNode && fiber.stateNode.vtableInstance) {
-      window._vtable = fiber.stateNode.vtableInstance;
-      window._vtableElement = el;
-      return { ok: true, levels: count };
-    }
-    fiber = fiber.return;
-  }
-  return { ok: false, reason: 'vtableInstance not found in ' + count + ' levels' };
+  return { ok: false, reason: 'vtableInstance not found for index ' + targetIdx };
 }
 
 // ============ 2. 图标功能映射 ============
@@ -184,14 +206,14 @@ function scanColumns(maxCol) {
   var headerLevelCount = t.columnHeaderLevelCount || 1;
   var results = [];
   // 可见 VTable 根元素相对【iframe 自身视口】的偏移。
-  var vtEl = window._vtableElement;
-  if (!_duVisibleVTableElement(vtEl)) vtEl = findVisibleVTableElement();
+  var vtEl = window._vtableElement || findVisibleVTableElement();
   if (!vtEl) return null;
   var vtRect = vtEl.getBoundingClientRect();
   // iframe 在顶层视口的偏移（JS 一次算完，Python 不再叠加）
   var ifrRect = window.frameElement ? window.frameElement.getBoundingClientRect() : { left: 0, top: 0 };
-
-  for (var col = 0; col < Math.min(maxCol, t.colCount || maxCol); col++) {
+  var allCols = t.columns || (t.options && t.options.columns) || [];
+  var totalCols = Math.max(t.colCount || 0, allCols.length);
+  for (var col = 0; col < Math.min(maxCol, totalCols); col++) {
     var bodyInfo = classifyColumnBody(t, col);
     for (var row = 0; row < headerLevelCount; row++) {
       var isHeader = false;
@@ -199,15 +221,16 @@ function scanColumns(maxCol) {
 
       var title = '';
       try { if (t.getCellValue) title = t.getCellValue(col, row) || ''; } catch (e) {}
+      if (!title && allCols[col]) { title = allCols[col].title || allCols[col].caption || allCols[col].field || ''; }
       if (!title) { try { var define = t.getHeaderDefine ? t.getHeaderDefine(col, row) : null; if (define) title = define.title || define.caption || ''; } catch (e) {} }
       if (!title) { try { title = t.getHeaderField ? t.getHeaderField(col, row) || '' : ''; } catch (e) {} }
-
       var icons = [];
       if (isHeader) { icons = getCellIconBounds(t, col, row); }
 
       var titleText = typeof title === 'string' ? title : String(title);
       var entry = {
         col: col, row: row, isHeader: isHeader,
+        field: allCols[col] ? (allCols[col].field || allCols[col].key || '') : '',
         title: titleText,
         titlePreview: titleText.length > 80 ? titleText.substring(0, 80) + '…' : titleText,
         bodyBehavior: bodyInfo.behavior, bodyDetail: bodyInfo.detail,
@@ -249,8 +272,7 @@ function scanHeaderCellIcons(maxCol, sampleRows) {
   var t = window._vtable;
   if (!t) return null;
   var headerLevelCount = t.columnHeaderLevelCount || 1;
-  var vtEl = window._vtableElement;
-  if (!_duVisibleVTableElement(vtEl)) vtEl = findVisibleVTableElement();
+  var vtEl = window._vtableElement || findVisibleVTableElement();
   if (!vtEl) return null;
   var vtRect = vtEl.getBoundingClientRect();
   var ifrRect = window.frameElement ? window.frameElement.getBoundingClientRect() : { left: 0, top: 0 };

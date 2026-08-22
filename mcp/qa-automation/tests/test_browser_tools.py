@@ -103,7 +103,7 @@ async def test_fill_dual_modes_and_observation(client: Client, cdp_url: str) -> 
     )
     assert r.data["ok"] is True, r.data
     assert r.data["observation"] is not None, "type 输入后应观察到消息"
-    assert "输入:abc" in r.data["observation"]["text"]
+    assert "输入:abc" in r.data["observation"]["layer"]["text"]
 
     # page_fill 默认 type（打字机）+ press_enter → 回车事件触发消息（fill 后同样观察）
     r = await client.call_tool(
@@ -119,7 +119,7 @@ async def test_fill_dual_modes_and_observation(client: Client, cdp_url: str) -> 
     assert r.data["ok"] is True, r.data
     assert r.data["input_method"] == "fill"
     assert r.data["observation"] is not None
-    assert "输入:q2" in r.data["observation"]["text"]
+    assert "输入:q2" in r.data["observation"]["layer"]["text"]
 
     # visualize=True：光标注入不崩，交互完成特效从 DOM 移除
     r = await client.call_tool(
@@ -207,7 +207,7 @@ async def test_select_antd_dropdown(client: Client, cdp_url: str) -> None:
     )
     assert r.data["ok"] is True, r.data
     assert r.data["observation"] is not None, "select 后应观察到消息"
-    assert "已选择:固定改机" in r.data["observation"]["text"]
+    assert "已选择:固定改机" in r.data["observation"]["layer"]["text"]
 
     # 歧义：'过敏原' 命中两个候选 → 报错并给出候选列表（不盲目点击）
     r = await client.call_tool(
@@ -223,7 +223,7 @@ async def test_select_antd_dropdown(client: Client, cdp_url: str) -> None:
         {"session": "sel", "action": "select", "role": "combobox", "value": "不含过敏原"},
     )
     assert r.data["ok"] is True, r.data
-    assert "已选择:不含过敏原" in r.data["observation"]["text"]
+    assert "已选择:不含过敏原" in r.data["observation"]["layer"]["text"]
 
     await client.call_tool("session_close", {"name": "sel"})
     await client.call_tool("browser_disconnect", {})

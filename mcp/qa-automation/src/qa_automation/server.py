@@ -36,7 +36,7 @@ SERVER_INSTRUCTIONS = """你是 APS/SCM/WMS 企业级 UI 自动化测试 MCP 服
    session_list 确认会话与账号的对应关系（account 字段），严禁操作落到其他账号的窗口。
 6. 标签页策略：优先接管/切换浏览器中已存在的标签页（page_* 自动接管前台激活标签页；
    目标页在后台时用 tab_list 查看、tab_switch 切换），严禁新建空白标签页后再操作。
-7. 元素交互统一用 page_interact：定位信息（role/name、text、placeholder、xpath、css、视口坐标 x/y）
+7. 元素交互统一用 page_interact：定位信息（role/name、text、placeholder、css、视口坐标 x/y）
    优先取自 analyze_current_page 输出；坐标模式不做计算直接使用传入 x/y；
    in_iframe 默认 true（激活 iframe 内查找）；禁用截图→坐标的视觉驱动方案。"""
 

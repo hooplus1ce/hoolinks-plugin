@@ -399,23 +399,43 @@ function scrollToCell(col, row) {
 function scrollToColumnByIndex(col) {
   var t = window._vtable;
   if (!t) return { ok: false, reason: 'no vtable' };
-  if (typeof t.scrollToCol === 'function') { t.scrollToCol(col); return { ok: true, api: 'scrollToCol' }; }
-  if (typeof t.scrollToCell === 'function') { t.scrollToCell({ col: col, row: 0 }); return { ok: true, api: 'scrollToCell' }; }
+  if (typeof t.scrollToCol === 'function') {
+    t.scrollToCol(col);
+    if (typeof t.render === 'function') t.render();
+    return { ok: true, api: 'scrollToCol' };
+  }
+  if (typeof t.scrollToCell === 'function') {
+    t.scrollToCell({ col: col, row: 0 });
+    if (typeof t.render === 'function') t.render();
+    return { ok: true, api: 'scrollToCell' };
+  }
   return { ok: false, reason: 'no scroll API' };
 }
 
 function scrollToRowByIndex(row) {
   var t = window._vtable;
   if (!t) return { ok: false, reason: 'no vtable' };
-  if (typeof t.scrollToRow === 'function') { t.scrollToRow(row); return { ok: true, api: 'scrollToRow' }; }
-  if (typeof t.scrollToCell === 'function') { t.scrollToCell({ col: 0, row: row }); return { ok: true, api: 'scrollToCell' }; }
+  if (typeof t.scrollToRow === 'function') {
+    t.scrollToRow(row);
+    if (typeof t.render === 'function') t.render();
+    return { ok: true, api: 'scrollToRow' };
+  }
+  if (typeof t.scrollToCell === 'function') {
+    t.scrollToCell({ col: 0, row: row });
+    if (typeof t.render === 'function') t.render();
+    return { ok: true, api: 'scrollToCell' };
+  }
   return { ok: false, reason: 'no scroll API' };
 }
 
 function scrollToCellPosition(col, row) {
   var t = window._vtable;
   if (!t) return { ok: false, reason: 'no vtable' };
-  if (typeof t.scrollToCell === 'function') { t.scrollToCell({ col: col, row: row }); return { ok: true, api: 'scrollToCell' }; }
+  if (typeof t.scrollToCell === 'function') {
+    t.scrollToCell({ col: col, row: row });
+    if (typeof t.render === 'function') t.render();
+    return { ok: true, api: 'scrollToCell' };
+  }
   return { ok: false, reason: 'no scrollToCell' };
 }
 
@@ -423,11 +443,15 @@ function setScrollPosition(scrollLeft, scrollTop) {
   var t = window._vtable;
   if (!t) return { ok: false, reason: 'no vtable' };
   var applied = [];
-  if (scrollLeft !== null && scrollLeft !== undefined && typeof t.setScrollLeft === 'function') {
-    t.setScrollLeft(scrollLeft); applied.push('setScrollLeft');
+  if (scrollLeft !== null && scrollLeft !== undefined) {
+    if (typeof t.setScrollLeft === 'function') { t.setScrollLeft(scrollLeft); applied.push('setScrollLeft'); }
+    if (t.stateManager && typeof t.stateManager.setScrollLeft === 'function') { t.stateManager.setScrollLeft(scrollLeft); applied.push('stateManager.setScrollLeft'); }
+    if (typeof t.render === 'function') t.render();
   }
-  if (scrollTop !== null && scrollTop !== undefined && typeof t.setScrollTop === 'function') {
-    t.setScrollTop(scrollTop); applied.push('setScrollTop');
+  if (scrollTop !== null && scrollTop !== undefined) {
+    if (typeof t.setScrollTop === 'function') { t.setScrollTop(scrollTop); applied.push('setScrollTop'); }
+    if (t.stateManager && typeof t.stateManager.setScrollTop === 'function') { t.stateManager.setScrollTop(scrollTop); applied.push('stateManager.setScrollTop'); }
+    if (typeof t.render === 'function') t.render();
   }
   if (!applied.length) return { ok: false, reason: 'no setScroll API' };
   return { ok: true, applied: applied };

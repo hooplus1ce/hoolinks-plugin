@@ -6,10 +6,15 @@
 - 激活 tabpanel（role="tabpanel" 且 aria-hidden="false"）内的 iframe → 当前激活功能页
 
 元素提取（顶层 DOM + 激活 iframe + 聚焦弹层）：
-- 按钮/输入框/下拉框/链接等可交互控件，输出：唯一 CSS、XPath、get_by_role 参数、
+- 按钮/输入框/下拉框/链接等可交互控件，输出：唯一 CSS、get_by_role 参数、
   视口绝对坐标（元素中心，iframe 已叠加偏移）、ref、input_type
+  （xpath 不作为输出以降 token；交互定位用 css/gbr/坐标）
 - 弹层聚焦裁剪：页面存在可见弹层（modal/dropdown）时，只输出弹层内元素
   （当前关注点），裁剪底层页面元素以降低 token；消息（ant-message）单独报告文本
+- 弹层类型：antd portal（.ant-modal-wrap / .ant-select-dropdown / .ant-message-notice）
+  与 VTable 自绘弹层（.vtable-filter-menu 列头筛选面板挂 body 下；
+  canvas 同级兄弟节点 vtable__menu-element / vtable__bubble-tooltip-element；
+  单元格编辑器下拉：无 class 面板 + .virtual-option 选项）
 """
 from __future__ import annotations
 
@@ -76,7 +81,7 @@ _SCAN_JS = r"""
     if (el.closest('.ant-switch')) return 'switch';
     if (el.closest('.ant-checkbox-wrapper')) return 'checkbox';
     if (el.closest('.ant-radio-wrapper')) return 'radio';
-    if (el.closest('.ant-select-item-option, .ant-select-dropdown-menu-item, .ant-cascader-menu-item')) return 'option'; 'option';
+    if (el.closest('.ant-select-item-option, .ant-select-dropdown-menu-item, .ant-cascader-menu-item, .virtual-option')) return 'option';
     return null;
   };
   const antComponentSel = '.ant-select, .ant-picker, .ant-cascader, .ant-tree-select, .ant-checkbox-wrapper, .ant-radio-wrapper, .ant-switch';
@@ -99,7 +104,7 @@ _SCAN_JS = r"""
     if (parentLabel && parentLabel.innerText) return parentLabel.innerText.trim();
     const antComp = el.closest(antComponentSel);
     const t = el.tagName.toLowerCase();
-    const roleAttr = el.getAttribute('role') || '';
+    const roleAttr = el.getAttribute('role') || getRole(el) || '';
     const isTextLike = t === 'button' || t === 'a'
       || ['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'radio', 'switch'].includes(roleAttr);
     if (isTextLike) {
@@ -146,25 +151,12 @@ _SCAN_JS = r"""
     }
     return pick(parts.slice(-3).join(' > '));
   };
-  const xpath = (el) => {
-    const parts = [];
-    let node = el;
-    while (node && node.nodeType === 1 && node !== document) {
-      let idx = 1;
-      let sib = node.previousElementSibling;
-      while (sib) { if (sib.tagName === node.tagName) idx++; sib = sib.previousElementSibling; }
-      const tag = node.tagName.toLowerCase();
-      parts.unshift(idx > 1 ? tag + '[' + idx + ']' : tag);
-      node = node.parentElement;
-    }
-    return '/' + parts.join('/');
-  };
   const selector = 'button, input, select, textarea, a[href], [role="button"], [role="combobox"],'
     + ' [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [role="searchbox"],'
     + ' [role="spinbutton"], [role="slider"], [role="tab"], [role="menuitem"], [role="option"],'
     + ' .ant-switch, .ant-select, .ant-picker, .ant-cascader, .ant-tree-select,'
     + ' .ant-select-item-option, .ant-select-dropdown-menu-item, .ant-cascader-menu-item,'
-    + ' .ant-checkbox-wrapper, .ant-radio-wrapper';
+    + ' .ant-checkbox-wrapper, .ant-radio-wrapper, .virtual-option';
   scope.querySelectorAll(selector).forEach((el) => {
     if (!visible(el)) return;
     const role = getRole(el);
@@ -178,7 +170,6 @@ _SCAN_JS = r"""
       role,
       name: getName(el),
       css: uniqueCss(el),
-      xpath: xpath(el),
       input_type: el.tagName.toLowerCase() === 'input' ? (el.getAttribute('type') || 'text') : '',
       cx: rect.x + rect.width / 2,
       cy: rect.y + rect.height / 2,
@@ -188,11 +179,14 @@ _SCAN_JS = r"""
 }
 """
 
-# 弹层聚焦检测：可见 modal / 下拉 / 消息（antd portal 结构）
+# 弹层聚焦检测：可见 modal / 下拉 / 消息（antd portal 结构）+ VTable 自绘弹层
+# （.vtable-filter-menu 筛选面板挂 body 下；canvas 同级兄弟节点为右键菜单/气泡）
 _FOCUS_LAYER_JS = r"""
 () => {
   const visible = (el) => {
     if (!el) return false;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden' || st.visibility === 'collapse') return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
@@ -238,6 +232,49 @@ _FOCUS_LAYER_JS = r"""
       return { kind: 'dropdown', container: cssOf(drop) };
     }
   }
+  // VTable 自绘弹层（canvas 同级兄弟节点 / body 下筛选面板，非 antd portal）：
+  // - .vtable-filter-menu: 列头筛选面板（挂 body 下，absolute + 高 z-index）
+  // - canvas 父容器 .vtable 内的可见兄弟 div: 右键菜单 vtable__menu-element / 气泡
+  const vtableLayers = [
+    ...document.querySelectorAll('.vtable-filter-menu:not([style*="display: none"])'),
+  ].filter(visible);
+  if (vtableLayers.length) {
+    return { kind: 'dropdown', container: cssOf(vtableLayers[0]) };
+  }
+  // VTable 单元格编辑器下拉（无 class 面板 + .virtual-option 选项）
+  for (const opt of document.querySelectorAll('.virtual-option')) {
+    let p = opt.parentElement;
+    while (p && p !== document.body) {
+      const st = getComputedStyle(p);
+      if ((st.position === 'fixed'
+           || (st.position === 'absolute' && Number.parseInt(st.zIndex || '0', 10) > 0))
+          && visible(p)) {
+        return { kind: 'dropdown', container: cssOf(p) };
+      }
+      p = p.parentElement;
+    }
+  }
+  for (const host of document.querySelectorAll('div.vtable, .vtable-container')) {
+    if (!visible(host)) continue;
+    const canvas = host.querySelector('canvas');
+    if (!canvas) continue;
+    const siblings = [...host.children].filter((ch) => {
+      if (ch === canvas || ch.tagName !== 'DIV') return false;
+      if (!visible(ch)) return false;
+      const cls = String(ch.className || '');
+      // VTable 隐藏特征：--hidden 后缀 class（menu-element/bubble-tooltip 均如此）
+      if (/--hidden\b/.test(cls)) return false;
+      if (cls.includes('input-container')) return false;
+      return cls.includes('vtable__menu-element')
+        || cls.includes('vtable__bubble-tooltip-element')
+        || cls.includes('vtable__dropdown')
+        || cls.includes('vtable__popup')
+        || cls.includes('filter-menu');
+    });
+    if (siblings.length) {
+      return { kind: 'dropdown', container: cssOf(siblings[0]) };
+    }
+  }
   // 消息（ant-message-notice 存在）
   const msgs = [...document.querySelectorAll('.ant-message-notice')].filter(visible);
   if (msgs.length) {
@@ -277,7 +314,7 @@ async def _active_iframe_frame(page):
 @tool(
     title="Page: Analyze Current",
     description="识别当前激活功能页（面包屑/标签栏/激活 iframe）并提取可交互元素：顶层 DOM 与激活 iframe"
-    "内按钮/输入框/下拉框/链接等的定位信息（唯一 CSS、XPath、get_by_role 参数、视口绝对坐标）。"
+    "内按钮/输入框/下拉框/链接等的定位信息（唯一 CSS、get_by_role 参数、视口绝对坐标）。"
     "存在可见弹层（modal/下拉）时自动聚焦弹层、裁剪底层页面元素以降低 token；"
     "消息（ant-message）单独报告文本。",
     icons=[_ANALYZE_ICON],
@@ -368,7 +405,6 @@ async def analyze_current_page(
                             "name": el["name"],
                             "input_type": el.get("input_type", ""),
                             "css": el["css"],
-                            "xpath": el["xpath"],
                             "gbr": {"role": el["role"], "name": el["name"]},
                             "x": round(el["cx"] + offset[0], 1),
                             "y": round(el["cy"] + offset[1], 1),
@@ -389,7 +425,6 @@ async def analyze_current_page(
                         "name": el["name"],
                         "input_type": el.get("input_type", ""),
                         "css": el["css"],
-                        "xpath": el["xpath"],
                         "gbr": {"role": el["role"], "name": el["name"]},
                         "x": round(el["cx"], 1),
                         "y": round(el["cy"], 1),
@@ -427,7 +462,6 @@ async def analyze_current_page(
                                 "name": el["name"],
                                 "input_type": el.get("input_type", ""),
                                 "css": el["css"],
-                                "xpath": el["xpath"],
                                 "gbr": {"role": el["role"], "name": el["name"]},
                                 "x": round(el["cx"] + fx, 1),
                                 "y": round(el["cy"] + fy, 1),
