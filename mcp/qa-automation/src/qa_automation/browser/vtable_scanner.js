@@ -44,6 +44,25 @@ function mountVTable(index) {
   vtableEls = vtableEls.filter(function(el) {
     return el.querySelector('canvas') || el.querySelector('table') || el.className.indexOf('vtable') !== -1;
   });
+  // 优先挂载可见弹窗(portal)内的 VTable：弹窗(如"选择设备")是当前交互目标，
+  // 不应按 DOM 顺序取页面上第一个表格(可能选中隐藏/背景/0 行表)。
+  var modalWraps = [].slice.call(document.querySelectorAll('.ant-modal-wrap'));
+  for (var mi = 0; mi < modalWraps.length; mi++) {
+    var mw = modalWraps[mi];
+    if (mw.classList.contains('ant-modal-mask-hidden')) continue;
+    var mst = window.getComputedStyle(mw);
+    if (mst.display === 'none' || mst.visibility === 'hidden') continue;
+    var mrect = (mw.querySelector('.ant-modal') || mw).getBoundingClientRect();
+    if (!(mrect.width > 0 && mrect.height > 0)) continue;
+    var inModal = vtableEls.filter(function(el) { return mw.contains(el); });
+    if (inModal.length) {
+      var rest = vtableEls.filter(function(el) {
+        return inModal.indexOf(el) === -1;
+      });
+      vtableEls = inModal.concat(rest);
+    }
+    break;
+  }
   var targetIdx = (typeof index === 'number') ? index : (typeof window._vtableIndex === 'number' ? window._vtableIndex : 0);
   var targetEl = vtableEls[targetIdx] || vtableEls[0];
   var nodesToTry = [targetEl.querySelector('canvas'), targetEl, targetEl.parentElement].filter(Boolean);

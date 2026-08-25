@@ -60,8 +60,8 @@ async def test_errors_when_not_connected(client: Client) -> None:
     assert "connect" in r2.data["error"].lower()
 
 
-async def test_session_errors(client: Client) -> None:
-    await client.call_tool("browser_connect", {"mode": "launch", "headless": True})
+async def test_session_errors(client: Client, cdp_url: str) -> None:
+    await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
     try:
         r = await client.call_tool("session_create", {"name": "dup"})
         assert r.data["ok"] is True
@@ -73,6 +73,44 @@ async def test_session_errors(client: Client) -> None:
         await client.call_tool("browser_disconnect", {})
 
 
+async def test_browser_connect_auto_creates_default_session(client: Client, cdp_url: str) -> None:
+    """browser_connect 默认自动完成连接+建默认会话+就绪，后续可直接执行页面操作。"""
+    r = await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
+    try:
+        assert r.data["ok"] is True
+        assert r.data["session"] == "default"
+        assert r.data["active_session"] == "default"
+        # 无需手动 session_create，直接可以进行 page 操作
+        r_goto = await client.call_tool("page_goto", {"url": "data:text/html,<h1>Ready</h1>"})
+        assert r_goto.data["ok"] is True
+        r_title = await client.call_tool("page_title", {})
+        assert r_title.data["ok"] is True
+    finally:
+        await client.call_tool("browser_disconnect", {})
+
+
+async def test_browser_connect_custom_session_and_skip(client: Client, cdp_url: str) -> None:
+    """browser_connect 支持指定 session_name，也支持 create_session=False 跳过建会话。"""
+    r = await client.call_tool(
+        "browser_connect",
+        {"mode": "attach", "cdp_url": cdp_url, "session_name": "custom_sess"},
+    )
+    try:
+        assert r.data["ok"] is True
+        assert r.data["session"] == "custom_sess"
+        assert r.data["active_session"] == "custom_sess"
+    finally:
+        await client.call_tool("browser_disconnect", {})
+
+    r2 = await client.call_tool(
+        "browser_connect",
+        {"mode": "attach", "cdp_url": cdp_url, "create_session": False},
+    )
+    try:
+        assert r2.data["ok"] is True
+        assert r2.data["session"] is None
+    finally:
+        await client.call_tool("browser_disconnect", {})
 _FILL_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <input id="i">
 <div class="ant-message"><span></span></div>
@@ -131,6 +169,55 @@ async def test_fill_dual_modes_and_observation(client: Client, cdp_url: str) -> 
     await client.call_tool("session_close", {"name": "fill"})
     await client.call_tool("browser_disconnect", {})
 
+
+async def test_locator_parameter_normalization_and_tolerance(client: Client, cdp_url: str) -> None:
+    """验证空字符串清洗、多维度容错及 role+name 语义定位健壮性。"""
+    await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
+    await client.call_tool("session_create", {"name": "norm", "use_default": False})
+    await client.call_tool("page_goto", {"url": "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'></head><body><button id='b'>提交</button><input id='inp' placeholder='请输入'></body></html>", "session": "norm"})
+    try:
+        # 1. 传了 role+name，同时传了空字符串 "" 的 text/placeholder/css，不应报错
+        r1 = await client.call_tool(
+            "page_interact",
+            {
+                "session": "norm",
+                "action": "click",
+                "role": "button",
+                "name": "提交",
+                "text": "",
+                "placeholder": "",
+                "css": "",
+            },
+        )
+        assert r1.data["ok"] is True, r1.data
+
+        # 2. 传了 role+name 且 text==name（冗余），自动去重择优
+        r2 = await client.call_tool(
+            "page_interact",
+            {
+                "session": "norm",
+                "action": "click",
+                "role": "button",
+                "name": "提交",
+                "text": "提交",
+            },
+        )
+        assert r2.data["ok"] is True, r2.data
+
+        # 3. 仅传 name 且未传 role，自动降级为 text 定位
+        r3 = await client.call_tool(
+            "page_interact",
+            {
+                "session": "norm",
+                "action": "click",
+                "name": "提交",
+                "css": "",
+            },
+        )
+        assert r3.data["ok"] is True, r3.data
+    finally:
+        await client.call_tool("session_close", {"name": "norm"})
+        await client.call_tool("browser_disconnect", {})
 
 _ANTD_SELECT_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <style>.ant-select-dropdown-hidden{display:none}</style>
@@ -229,9 +316,9 @@ async def test_select_antd_dropdown(client: Client, cdp_url: str) -> None:
     await client.call_tool("browser_disconnect", {})
 
 
-async def test_visualize_env_toggle(client: Client) -> None:
+async def test_visualize_env_toggle(client: Client, cdp_url: str) -> None:
     """.env VISUAL_CURSOR_ENABLED 控制默认光标可视化（显式参数优先）。"""
-    await client.call_tool("browser_connect", {"mode": "launch", "headless": True})
+    await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
     await client.call_tool("session_create", {"name": "viz", "use_default": False})
     await client.call_tool("page_goto", {"url": "data:text/html,<h1>viz</h1>", "session": "viz"})
 
@@ -258,7 +345,6 @@ async def test_visualize_env_toggle(client: Client) -> None:
     del os.environ["VISUAL_CURSOR_ENABLED"]
 
     await client.call_tool("browser_disconnect", {})
-
 
 async def test_attach_roundtrip(client: Client, cdp_url: str) -> None:
     """真实接管浏览器全链路：连接→会话→导航→断言→截图→清理。"""
@@ -348,3 +434,54 @@ async def test_tab_list_and_switch(client: Client, cdp_url: str) -> None:
         r = await client.call_tool("tab_switch", {"session": "tabs", "url_contains": sub})
         assert r.data["ok"] is True
     await client.call_tool("browser_disconnect", {})
+
+async def test_upload_file_direct_and_antd_wrapper(client: Client, cdp_url: str, tmp_path) -> None:
+    """测试文件上传：直接 input[type=file] 注入以及 Antd .ant-upload 包装按钮。"""
+    test_file = tmp_path / "test_data.xlsx"
+    test_file.write_text("dummy content", encoding="utf-8")
+
+    html = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <form>
+      <input type="file" id="f1">
+      <span class="ant-upload">
+        <input type="file" style="display:none;" id="f2">
+        <button id="btnUpload">导入 Excel</button>
+      </span>
+    </form>
+    </body></html>"""
+
+    await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
+    await client.call_tool("session_create", {"name": "up", "use_default": False})
+    await client.call_tool("page_goto", {"url": "data:text/html;charset=utf-8," + html, "session": "up"})
+    try:
+        # 1. 传入单个字符串路径上传
+        r1 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "css": "#f1", "file_paths": str(test_file)},
+        )
+        assert r1.data["ok"] is True, r1.data
+        assert r1.data["mode"] == "set_input_files"
+
+        # 2. 对 Antd 按钮点击上传（自动命中嵌套的 input[type=file]）
+        r2 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "role": "button", "name": "导入 Excel", "file_paths": [str(test_file)]},
+        )
+        assert r2.data["ok"] is True, r2.data
+
+        # 3. 传入单数别名 file_path
+        r3 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "css": "#f1", "file_path": str(test_file)},
+        )
+        assert r3.data["ok"] is True, r3.data
+
+        # 4. 传入本地未预先创建的 xlsx 路径，自动补齐标准测试模板
+        r4 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "css": "#f1", "file_path": "auto_test_mock.xlsx"},
+        )
+        assert r4.data["ok"] is True, r4.data
+    finally:
+        await client.call_tool("session_close", {"name": "up"})
+        await client.call_tool("browser_disconnect", {})

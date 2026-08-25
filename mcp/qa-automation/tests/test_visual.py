@@ -13,9 +13,9 @@ async def _shadow_query(page, selector: str) -> bool:
     )
 
 
-async def test_virtual_cursor_injection() -> None:
+async def test_virtual_cursor_injection(cdp_url: str) -> None:
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
         s = await lc.create_session("v", use_default=False)
         page = await s.ensure_page()
@@ -47,11 +47,10 @@ async def test_virtual_cursor_injection() -> None:
     finally:
         await lc.close()
 
-
-async def test_cursor_reaches_target_before_return() -> None:
+async def test_cursor_reaches_target_before_return(cdp_url: str) -> None:
     """时序修复：target/moveTo 返回时动画已完成，光标已到目标（真实交互在光标到位后触发）。"""
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
         s = await lc.create_session("v", use_default=False)
         page = await s.ensure_page()
@@ -103,10 +102,10 @@ async def test_cursor_reaches_target_before_return() -> None:
         await lc.close()
 
 
-async def test_fill_with_visual_inject_write_and_cleanup() -> None:
+async def test_fill_with_visual_inject_write_and_cleanup(cdp_url: str) -> None:
     """page_fill/page_interact 的输入执行体：光标注入→写入→交互完成特效移除。"""
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
         s = await lc.create_session("v", use_default=False)
         page = await s.ensure_page()
@@ -128,5 +127,43 @@ async def test_fill_with_visual_inject_write_and_cleanup() -> None:
         assert await page.evaluate(
             "() => !document.getElementById('__qa_mcp_visuals__')"
         ) is True
+    finally:
+        await lc.close()
+
+async def test_cursor_position_continuity_across_actions(cdp_url: str) -> None:
+    """连贯光标移动：第一步移动到目标后清除视效，第二步从第一步终点平滑起跑，而不是回到 (0,0)。"""
+    lc = PlaywrightLifecycle()
+    await lc.attach(cdp_url=cdp_url)
+    try:
+        s = await lc.create_session("v", use_default=False)
+        page = await s.ensure_page()
+        await page.goto("data:text/html,<h1>continuity test</h1>")
+
+        # 动作 1：移动到 (300, 200) 并点击
+        await VirtualCursor.attach(page)
+        await VirtualCursor.click_at(page, 300, 200)
+        await VirtualCursor.clear(page)
+
+        # 验证全局位置已被持久化为 (300, 200)
+        persisted = await page.evaluate("() => globalThis.__qa_mcp_cursor_pos__")
+        assert persisted == {"x": 300, "y": 200}
+
+        # 动作 2：再次 attach 并挂载，光标初始位置应为 (300, 200)，而不是 (0, 0)
+        await VirtualCursor.attach(page)
+        pos_before_move2 = await page.evaluate(
+            """() => {
+                const el = document.getElementById('__qa_mcp_visuals__').shadowRoot.querySelector('img.cursor');
+                const cs = getComputedStyle(el).transform;
+                const m = cs && cs !== 'none' ? cs.match(/matrix\\([^)]*,\\s*([-\\d.]+),\\s*([-\\d.]+)\\)/) : null;
+                return m ? [Number(m[1]) + 5, Number(m[2]) + 10] : null;
+            }"""
+        )
+        assert pos_before_move2 == [300.0, 200.0], f"cursor reset to origin instead of continuing: {pos_before_move2}"
+
+        # 动作 2 移动到 (500, 400)
+        await VirtualCursor.move_to(page, 500, 400)
+        persisted2 = await page.evaluate("() => globalThis.__qa_mcp_cursor_pos__")
+        assert persisted2 == {"x": 500, "y": 400}
+        await VirtualCursor.clear(page)
     finally:
         await lc.close()

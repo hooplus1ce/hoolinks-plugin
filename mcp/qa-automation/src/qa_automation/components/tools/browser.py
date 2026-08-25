@@ -78,12 +78,23 @@ async def _active_iframe_frame(page):
         if await iframe_loc.count() == 0:
             return None
         frame_el = iframe_loc.first
-        name = await frame_el.get_attribute("name") or ""
-        src = await frame_el.get_attribute("src") or ""
+        name = ""
+        src = ""
+        try:
+            name = await frame_el.get_attribute("name", timeout=100) or ""
+        except Exception:
+            pass
+        try:
+            src = await frame_el.get_attribute("src", timeout=100) or ""
+        except Exception:
+            pass
         for f in page.frames:
             if (name and f.name == name) or (not name and src and f.url == src):
                 return f
-        return await frame_el.content_frame()
+        try:
+            return await frame_el.content_frame()
+        except Exception:
+            return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -93,13 +104,13 @@ async def _detect_focus_layer(page) -> dict | None:
     frame = await _active_iframe_frame(page)
     if frame is not None:
         try:
-            layer = await frame.evaluate(_FOCUS_LAYER_JS)
+            layer = await asyncio.wait_for(frame.evaluate(_FOCUS_LAYER_JS), timeout=0.3)
             if layer:
                 return {**layer, "scope": "iframe"}
         except Exception:  # noqa: BLE001
             pass
     try:
-        layer = await page.evaluate(_FOCUS_LAYER_JS)
+        layer = await asyncio.wait_for(page.evaluate(_FOCUS_LAYER_JS), timeout=0.3)
         if layer:
             return {**layer, "scope": "top"}
     except Exception:  # noqa: BLE001
@@ -118,52 +129,51 @@ async def _active_iframe_snapshot(page) -> tuple[dict | None, str | None]:
             '.ant-tabs-tabpane[role="tabpanel"][aria-hidden="false"] iframe'
         )
         fe = iframe_loc.first
+        fid = ""
+        name = ""
+        src = ""
+        try:
+            fid = await fe.get_attribute("id", timeout=100) or ""
+        except Exception:
+            pass
+        try:
+            name = await fe.get_attribute("name", timeout=100) or ""
+        except Exception:
+            pass
+        try:
+            src = await fe.get_attribute("src", timeout=100) or ""
+        except Exception:
+            pass
         info = {
-            "id": (await fe.get_attribute("id")) or "",
-            "name": (await fe.get_attribute("name")) or "",
-            "src": (await fe.get_attribute("src")) or "",
+            "id": fid,
+            "name": name,
+            "src": src,
         }
     except Exception:  # noqa: BLE001
         info = {"id": "", "name": frame.name or "", "src": frame.url or ""}
     key = "|".join(v for v in info.values() if v) or "iframe"
     return info, key
 
-
 async def _observe_layers(
     page, before_url: str | None = None, before_iframe: str | None = None
 ) -> dict:
-    """交互后观察页面状态：弹层/浮层/消息 + 激活 iframe + URL 跳转。
-
-    先立即检测一次（点击已有结果时零等待返回），再以 1s 间隔轮询最长 3s，
-    捕捉动画延迟出现的弹层/跳转。返回
-    {layer, iframe, url, url_changed, iframe_changed}；
-    窗口内无变化时返回最后一次快照（含当前 url/iframe 现状，供调用方比对）。
-    """
-    last: dict | None = None
-    for i in range(4):
-        if i:
-            await asyncio.sleep(1.0)
-        layer = await _detect_focus_layer(page)
-        iframe_info, iframe_key = await _active_iframe_snapshot(page)
-        url = page.url
-        entry = {
-            "layer": layer,
-            "iframe": iframe_info,
-            "url": url,
-            "url_changed": before_url is not None and url != before_url,
-            "iframe_changed": before_iframe is not None and iframe_key != before_iframe,
-        }
-        if layer or entry["url_changed"] or entry["iframe_changed"]:
-            return entry
-        last = entry
-    return last or {
-        "layer": None,
-        "iframe": None,
-        "url": page.url,
-        "url_changed": False,
-        "iframe_changed": False,
+    """交互后观察页面状态：弹层/浮层/消息 + 激活 iframe + URL 跳转（毫秒级极速返回）。"""
+    try:
+        layer = await asyncio.wait_for(_detect_focus_layer(page), timeout=0.4)
+    except Exception:
+        layer = None
+    try:
+        iframe_info, iframe_key = await asyncio.wait_for(_active_iframe_snapshot(page), timeout=0.4)
+    except Exception:
+        iframe_info, iframe_key = None, None
+    url = page.url
+    return {
+        "layer": layer,
+        "iframe": iframe_info,
+        "url": url,
+        "url_changed": before_url is not None and url != before_url,
+        "iframe_changed": before_iframe is not None and iframe_key != before_iframe,
     }
-
 
 async def _do_fill_with_visual(
     page,
@@ -296,11 +306,8 @@ async def _antd_select_option(
 ) -> None:
     """Ant Design Select 一步选择：click 展开 → 最新可见 dropdown → 按文本选 option。
 
-    点击目标提升到 .ant-select 容器（antd 内部 input 常 opacity:0/pointer-events:none，
-    点击 input 不展开）。连续下拉场景（挨个选下拉）存在动画竞态：上一个下拉的
-    收起动画未结束前元素仍 :visible，.last 可能命中残留下拉。处理：找不到目标
-    选项时，重新定位最新可见下拉重试，直至新下拉挂载（最多 4 次）。
-    visualize=True: 展开前对 .ant-select 容器做目标高亮（呼吸框）+ 光标移动。
+    优先在顶层 document.body 查找（Antd Portal 默认挂载于 body 根节点，而非 iframe 内部）；
+    找不到再在 frame 内部查找，避免在错误上下文等待超时。
     """
     container = trigger_locator.locator(
         "xpath=ancestor-or-self::*[contains(@class,'ant-select') "
@@ -309,35 +316,46 @@ async def _antd_select_option(
     if visualize:
         try:
             from qa_automation.browser.visual import VirtualCursor
-
-            box = await container.bounding_box()
+            box = await container.bounding_box(timeout=100)
             if box is not None:
                 await VirtualCursor.target(
                     page, box["x"], box["y"], box["width"], box["height"]
                 )
         except Exception:  # noqa: BLE001 - 特效失败不影响选择
             pass
-    await container.click()
-    for attempt in range(4):
-        dropdown = frame.locator(
+    try:
+        await container.click(timeout=800)
+    except Exception:
+        pass
+
+    # 优先在顶层 page 查找最新可见下拉层；若无再在 frame 内查找
+    for attempt in range(3):
+        dropdown = page.locator(
             ".ant-select-dropdown:visible, "
             ".ant-cascader-dropdown:visible, "
             ".ant-cascader-menus:visible"
         ).last
-        try:
-            await dropdown.wait_for(
-                state="visible",
-                timeout=3500 if attempt == 0 else 1500,
-            )
-        except Exception:
-            if attempt == 3:
-                raise RuntimeError(f"Ant Design 下拉未展开（选项: {option_text}）")
-            await asyncio.sleep(0.4)
-            continue
-        if await _click_option_in(dropdown, option_text):
-            return
-        await asyncio.sleep(0.4)
+        dropdown_count = await dropdown.count()
+        if dropdown_count == 0 and frame is not None:
+            dropdown = frame.locator(
+                ".ant-select-dropdown:visible, "
+                ".ant-cascader-dropdown:visible, "
+                ".ant-cascader-menus:visible"
+            ).last
+            dropdown_count = await dropdown.count()
+
+        if dropdown_count > 0:
+            if await _click_option_in(dropdown, option_text):
+                return
+        await asyncio.sleep(0.15)
+
     raise RuntimeError(f"Ant Design 下拉选项不存在: {option_text}")
+
+def _clean_str(val: Any) -> str | None:
+    if val is None:
+        return None
+    s = str(val).strip()
+    return s if s else None
 
 
 async def _resolve_locator(
@@ -352,26 +370,29 @@ async def _resolve_locator(
     in_iframe: bool = True,
     return_frame: bool = False,
 ):
-    """按语义定位优先级构造 Playwright Locator（AI agent 推荐策略）。
+    """按语义定位优先级构造 Playwright Locator（高韧性定位优先）。
 
-    优先级：get_by_role(role, name) → get_by_text(text) → get_by_placeholder
-    → xpath → css（结构兜底）。仅允许一个定位维度。
-    in_iframe=True（默认）：顶层文档找不到时，降级到激活 tabpanel 的 iframe
-    内查找（SCM 业务控件位于激活 iframe 中）；False 仅搜顶层。
-    return_frame=True：返回 (locator, frame)——frame 为命中元素所在 Frame
-    （顶层为 page 本身；iframe 内为对应 Frame），供 portal 浮层（下拉/日历）
-    在相同上下文定位。
+    优先级：role(+name) → text → placeholder → xpath → css。
+    支持空字符串自动归一化与多维度自适应择优，杜绝参数格式噪音引发报错。
     """
-    provided = sum(
-        1 for v in (role, text, placeholder, css, xpath) if v is not None
-    )
-    if provided == 0:
-        raise ValueError("need one of: role(+name) / text / placeholder / xpath / css")
-    if provided > 1:
-        raise ValueError(
-            "provide exactly one locator dimension (role/text/placeholder/xpath/css)"
-        )
+    role = _clean_str(role)
+    name = _clean_str(name)
+    text = _clean_str(text)
+    placeholder = _clean_str(placeholder)
+    css = _clean_str(css)
+    xpath = _clean_str(xpath)
 
+    if role is None and name is not None and text is None and placeholder is None and css is None and xpath is None:
+        text = name
+        name = None
+    if role is not None and text and not name:
+        name = text
+        text = None
+    if role is not None and text == name:
+        text = None
+
+    if not any((role, text, placeholder, css, xpath)):
+        raise ValueError("need one of: role(+name) / text / placeholder / xpath / css")
     async def build(target):
         if role is not None:
             if name:
@@ -388,6 +409,19 @@ async def _resolve_locator(
                             ).filter(has_text=name)
                             if await virt.count() > 0:
                                 return virt
+                    except Exception:  # noqa: BLE001
+                        pass
+                elif role in ("radio", "checkbox", "switch"):
+                    # antd 自定义单选/复选（.ant-radio-button-wrapper 等）
+                    try:
+                        if await loc.count() == 0:
+                            wrapper = target.locator(
+                                ".ant-radio-wrapper, .ant-radio-button-wrapper, "
+                                ".ant-checkbox-wrapper, .ant-checkbox-button-wrapper, "
+                                ".ant-segmented-item, .ant-tag-checkable, .ant-switch"
+                            ).filter(has_text=name)
+                            if await wrapper.count() > 0:
+                                return wrapper
                     except Exception:  # noqa: BLE001
                         pass
                 return loc
@@ -415,7 +449,9 @@ async def _resolve_locator(
 
 @tool(
     title="Browser: Connect",
-    description="接管已打开的浏览器（默认 http://127.0.0.1:9222）或自启 Chrome。mode=auto 先尝试接管，失败自动自启兜底。",
+    description="接管已打开的浏览器（默认 http://127.0.0.1:9222）并自动完成会话与页面初始化。"
+    "调用后即刻完成连接+创建激活会话+接管前台激活标签页，后续可直接执行页面操作。"
+    "除非用户明确指明要连接别的端口或开启多个不同账号下的上下文环境隔离，否则直接调用本工具即可一次性完成前置初始化。",
     icons=[_BROWSER_ICON],
     tags={"browser", "lifecycle"},
 )
@@ -424,42 +460,82 @@ async def browser_connect(
     mode: str = "auto",
     cdp_url: str | None = None,
     headless: bool = False,
+    session_name: str = "default",
+    create_session: bool = True,
 ) -> dict:
-    """接管或自启浏览器。
+    """接管或自启浏览器，并默认自动完成会话与页面初始化。
 
     Args:
         mode: auto=接管优先失败自启; attach=仅接管现有浏览器; launch=直接自启。
-        cdp_url: 接管目标地址（仅 attach/auto 使用）；缺省读环境变量 CDP_URL（默认 9222）。
+        cdp_url: 接管目标地址（仅 attach/auto 使用）；缺省读环境变量 CDP_URL（默认 http://127.0.0.1:9222）。
         headless: 自启模式是否无头（接管模式忽略）。
+        session_name: 自动初始化的会话名（默认 'default'）。
+        create_session: 是否在连接后立即自动创建并激活会话（默认 True，一次性完成所有前置初始化）。
     """
     lc = _lifecycle(ctx)
-    if lc.is_connected:
-        return {"ok": True, "connected": True, "mode": lc.mode}
     cdp_url = cdp_url or os.environ.get("CDP_URL", "http://127.0.0.1:9222")
 
-    if mode == "launch":
+    attach_error = None
+    if not lc.is_connected:
+        if mode == "launch":
+            try:
+                await lc.launch(headless=headless)
+            except Exception as exc:
+                return _err(exc)
+            await ctx.info("browser launched (fallback mode)")
+        else:
+            try:
+                await lc.attach(cdp_url=cdp_url)
+            except Exception as exc:
+                if mode == "attach":
+                    return _err(exc)
+                try:
+                    await lc.launch(headless=headless)
+                    attach_error = str(exc)
+                except Exception as exc2:
+                    return {"ok": False, "error": f"attach failed ({exc}); launch failed ({exc2})"}
+                await ctx.info(f"attach to {cdp_url} failed, launched browser instead")
+            else:
+                await ctx.info(f"attached to {cdp_url}")
+
+    # 自动创建/激活会话并接管前台激活标签页，使后续控制直接就绪
+    current_url = ""
+    current_title = ""
+    tabs_count = 0
+    if create_session:
         try:
-            await lc.launch(headless=headless)
+            session_obj = await lc.ensure_session(name=session_name, use_default=True)
+            page = await session_obj.ensure_page()
+            current_url = page.url or ""
+            try:
+                current_title = await page.title()
+            except Exception:
+                current_title = ""
+            tabs = await lc.list_tabs(session_name)
+            tabs_count = len(tabs)
         except Exception as exc:
-            return _err(exc)
-        await ctx.info("browser launched (fallback mode)")
-        return {"ok": True, "connected": True, "mode": "launch"}
+            await ctx.warning(f"session auto-init warning: {exc}")
 
-    try:
-        await lc.attach(cdp_url=cdp_url)
-    except Exception as exc:
-        if mode == "attach":
-            return _err(exc)
-        try:
-            await lc.launch(headless=headless)
-        except Exception as exc2:
-            return {"ok": False, "error": f"attach failed ({exc}); launch failed ({exc2})"}
-        await ctx.info(f"attach to {cdp_url} failed, launched browser instead")
-        return {"ok": True, "connected": True, "mode": "launch", "attach_error": str(exc)}
-
-    await ctx.info(f"attached to {cdp_url}")
-    return {"ok": True, "connected": True, "mode": "attach"}
-
+    active_name = lc.active_session_name or (session_name if create_session else None)
+    res = {
+        "ok": True,
+        "connected": True,
+        "mode": lc.mode,
+        "cdp_url": cdp_url if lc.mode == "attach" else None,
+        "session": active_name,
+        "active_session": active_name,
+        "url": current_url,
+        "title": current_title,
+        "tabs_count": tabs_count,
+        "message": (
+            f"已连接浏览器 ({lc.mode}) 并初始化会话 {active_name!r}，前台页面: {current_title or current_url or '空白页'}"
+            if create_session
+            else f"已连接浏览器 ({lc.mode})"
+        ),
+    }
+    if attach_error:
+        res["attach_error"] = attach_error
+    return res
 
 @tool(
     title="Browser: Status",
@@ -819,7 +895,7 @@ async def page_interact(
     press_enter: bool = False,
     in_iframe: bool = True,
     visualize: bool | None = None,
-    timeout_ms: int = 3_000,
+    timeout_ms: int = 1_500,
 ) -> dict:
     """通用交互（一次调用完成定位+动作）。
 
@@ -838,9 +914,18 @@ async def page_interact(
         press_enter: 输入完成后按回车（搜索框/确认输入场景）。
         in_iframe: 是否在激活 iframe 内查找（默认 true；false 仅搜顶层）。
         visualize: 是否显示虚拟光标（移动/高亮/点击波纹）。缺省读 .env VISUAL_CURSOR_ENABLED。
-        timeout_ms: 等待超时（毫秒，默认 3000）。
+        timeout_ms: 等待超时（毫秒，默认 1500）。
     """
     from qa_automation.browser.visual import VirtualCursor
+
+    action = _clean_str(action) or "click"
+    role = _clean_str(role)
+    name = _clean_str(name)
+    text = _clean_str(text)
+    placeholder = _clean_str(placeholder)
+    css = _clean_str(css)
+    xpath = _clean_str(xpath)
+    value = _clean_str(value)
 
     visualize = _visualize_default(visualize)
     lc = _lifecycle(ctx)
@@ -848,7 +933,6 @@ async def page_interact(
         page = await lc.page(session)
     except Exception as exc:
         return _err(exc)
-
     # 交互前基线：URL 与激活 iframe（供点击后观察比对弹层/跳转/iframe 变化）
     before_url = page.url
     _, before_iframe = await _active_iframe_snapshot(page)
@@ -907,7 +991,7 @@ async def page_interact(
         )
         if action == "click":
             try:
-                box = await locator.bounding_box(timeout=1000)
+                box = await locator.bounding_box(timeout=100)
             except Exception:  # noqa: BLE001
                 box = None
             if visualize and box is not None:
@@ -921,7 +1005,10 @@ async def page_interact(
             except Exception:
                 # actionability 检查超时（遮挡/动画等）→ 元素中心坐标物理点击兜底
                 if box is None:
-                    box = await locator.bounding_box()
+                    try:
+                        box = await locator.bounding_box(timeout=100)
+                    except Exception:
+                        box = None
                 if box is None:
                     raise
                 await page.mouse.click(
@@ -999,10 +1086,9 @@ async def page_interact(
         if visualize and action in ("click", "dblclick", "rightclick"):
             if box is None:
                 try:
-                    box = await locator.bounding_box(timeout=500)
+                    box = await locator.bounding_box(timeout=100)
                 except Exception:
                     pass
-            if box is not None:
                 try:
                     await VirtualCursor.click_at(
                         page,

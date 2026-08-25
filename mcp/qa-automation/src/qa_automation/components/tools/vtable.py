@@ -18,10 +18,35 @@ from qa_automation.browser import vtable as vt
 from qa_automation.browser.lifecycle import PlaywrightLifecycle
 from qa_automation.components.tools.browser import _active_iframe_frame, _err, _lifecycle
 
-_VTABLE_ICON = Icon(
-    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cmVjdCB4PSIzIiB5PSI0IiB3aWR0aD0iMTgiIGhlaWdodD0iMTYiIHJ4PSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHBhdGggZD0iTTMgMTBoMThNOSA0djE2IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMS41Ii8+PC9zdmc+",
-    mime_type="image/svg+xml",
-)
+_VISIBLE_MODAL_JS = """() => {
+  for (const wrap of document.querySelectorAll('.ant-modal-wrap')) {
+    if (wrap.classList.contains('ant-modal-mask-hidden')) continue;
+    const modal = wrap.querySelector('.ant-modal') || wrap;
+    const st = window.getComputedStyle(modal);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    const r = modal.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return true;
+  }
+  return false;
+}"""
+
+
+async def _frame_with_visible_modal(page) -> Any:
+    """返回包含可见 antd 弹窗(portal) 的 iframe Frame；无则 None。
+
+    业务弹窗(如"选择设备")渲染在业务 iframe 内，VTable 宿主应为此 iframe，
+    而非顶层页 —— 顶层页只会命中背景/站点表。弹窗打开时 tabpane iframe
+    检测(_active_iframe_frame)可能不稳定，故优先扫描所有 frame。
+    """
+    try:
+        for f in page.frames:
+            if f == page.main_frame:
+                continue
+            if await f.evaluate(_VISIBLE_MODAL_JS):
+                return f
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 async def _vtable_host(ctx: Context, session: str | None) -> tuple:
@@ -31,9 +56,14 @@ async def _vtable_host(ctx: Context, session: str | None) -> tuple:
     """
     lc: PlaywrightLifecycle = _lifecycle(ctx)
     page = await lc.page(session)
-    frame = await _active_iframe_frame(page)
+    frame = await _frame_with_visible_modal(page) or await _active_iframe_frame(page)
     host = frame if frame is not None else page
     return host, page
+
+_VTABLE_ICON = Icon(
+    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cmVjdCB4PSIzIiB5PSI0IiB3aWR0aD0iMTgiIGhlaWdodD0iMTYiIHJ4PSIyIiBmaWxsPSJub25lIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHBhdGggZD0iTTMgMTBoMThNOSA0djE2IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMS41Ii8+PC9zdmc+",
+    mime_type="image/svg+xml",
+)
 
 
 @tool(

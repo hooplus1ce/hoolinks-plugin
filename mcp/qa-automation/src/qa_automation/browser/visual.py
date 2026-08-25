@@ -30,18 +30,21 @@ _INSTALL_JS = r"""
 (() => {
   const KEY = '__qaMcpVisuals';
   const HOST_ID = '__qa_mcp_visuals__';
+  const POS_KEY = '__qa_mcp_cursor_pos__';
   const CURSOR_IMAGE = %CURSOR_IMAGE%;
   const EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
   if (globalThis[KEY]?.version === 2) { globalThis[KEY].mount(); return; }
   if (globalThis[KEY]) { try { globalThis[KEY].clear(); } catch (_) {} }
 
+  const savedPos = globalThis[POS_KEY] || { x: 0, y: 0 };
   const state = {
     host: null, root: null, cursor: null, highlight: null,
-    x: 0, y: 0, anim: null,
+    x: savedPos.x, y: savedPos.y, anim: null, timers: new Set(),
   };
 
   function setCursor(x, y) {
     state.x = x; state.y = y;
+    globalThis[POS_KEY] = { x, y };
     if (state.cursor) state.cursor.style.transform = `translate3d(${x - 5}px, ${y - 10}px, 0)`;
   }
   function mount() {
@@ -49,15 +52,16 @@ _INSTALL_JS = r"""
     document.getElementById(HOST_ID)?.remove();
     const host = document.createElement('div');
     host.id = HOST_ID;
-    host.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483647;overflow:visible;contain:layout style paint';
+    host.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none !important;z-index:2147483647;overflow:hidden !important;contain:strict;user-select:none !important;-webkit-user-select:none !important;touch-action:none !important;';
     const root = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
     style.textContent = `
-      .cursor { position:fixed;left:0;top:0;width:32px;height:32px;display:block;object-fit:contain;opacity:0;pointer-events:none;image-rendering:auto;will-change:transform,opacity;transition:opacity 100ms ${EASING}; }
+      :host, * { box-sizing: border-box !important; margin: 0; padding: 0; pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important; }
+      .cursor { position:fixed;left:0;top:0;width:32px;height:32px;display:block;object-fit:contain;opacity:0;pointer-events:none !important;image-rendering:-webkit-optimize-contrast;image-rendering:auto;will-change:transform,opacity;backface-visibility:hidden;transform-style:preserve-3d;transition:opacity 100ms ${EASING}; }
       .cursor.on { opacity: 1; }
-      .highlight { position:fixed;left:0;top:0;min-width:2px;min-height:2px;--accent:#22d3ee;color:var(--accent);border:2px solid currentColor;border-radius:6px;opacity:0;box-shadow:0 0 0 2px rgb(34 211 238 / 20%), 0 0 18px rgb(34 211 238 / 55%);pointer-events:none;overflow:visible;will-change:transform,opacity;transition:opacity 100ms ${EASING}; }
-      .highlight::before { content:'';position:absolute;inset:-5px;border:1px solid currentColor;border-radius:9px;opacity:.48;will-change:transform,opacity;animation:target-breathe 900ms ease-in-out infinite alternate; }
-      .ripple { position:fixed;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #22d3ee;border-radius:50%;pointer-events:none;box-shadow:0 0 12px #22d3ee;animation:click-ripple 520ms ease-out forwards; }
+      .highlight { position:fixed;left:0;top:0;box-sizing:border-box !important;min-width:2px;min-height:2px;--accent:#22d3ee;color:var(--accent);border:2px solid currentColor;border-radius:6px;opacity:0;box-shadow:0 0 0 2px rgb(34 211 238 / 20%), 0 0 18px rgb(34 211 238 / 55%);pointer-events:none !important;overflow:visible;will-change:transform,opacity;backface-visibility:hidden;transition:opacity 100ms ${EASING}; }
+      .highlight::before { content:'';position:absolute;inset:-5px;box-sizing:border-box !important;border:1px solid currentColor;border-radius:9px;opacity:.48;pointer-events:none !important;will-change:transform,opacity;animation:target-breathe 900ms ease-in-out infinite alternate; }
+      .ripple { position:fixed;left:0;top:0;box-sizing:border-box !important;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #22d3ee;border-radius:50%;pointer-events:none !important;box-shadow:0 0 12px #22d3ee;will-change:transform,opacity;animation:click-ripple 520ms ease-out forwards; }
       @keyframes target-breathe { from { transform:scale3d(.985,.985,1); opacity:.3; } to { transform:scale3d(1.025,1.025,1); opacity:.68; } }
       @keyframes click-ripple { from { transform:scale(.35); opacity:1; } to { transform:scale(4.2); opacity:0; } }
       @media (prefers-reduced-motion: reduce) {
@@ -75,20 +79,31 @@ _INSTALL_JS = r"""
     root.append(style, highlight, cursor);
     (document.documentElement || document.body).appendChild(host);
     state.host = host; state.root = root; state.cursor = cursor; state.highlight = highlight;
+    
+    // 恢复全局保存的最新光标位置（使下一次操作从上一次动作结束点连贯开始）
+    const curPos = globalThis[POS_KEY] || { x: 0, y: 0 };
+    state.x = curPos.x;
+    state.y = curPos.y;
     setCursor(state.x, state.y);
     return true;
   }
   function moveTo(x, y) {
-    // 返回动画完成 Promise：Python 侧 evaluate 等待，保证真实交互在光标到位后触发
     mount();
-    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const distance = Math.hypot(x - state.x, y - state.y);
-    // 保留减速轨迹（系数 4）但收紧常数项与上限：原 (110+sqrt(d)*7)*5 令任意移动 ≥550ms，
-    // 近距离微调也在目标前长时间低速滑行，观感为"到达后停留"；现全距离 150-650ms
-    const duration = reduced ? 0 : Math.round(Math.min(650, Math.max(150, (60 + Math.sqrt(distance) * 5) * 4)));
+    const from = { x: state.x, y: state.y };
+    const distance = Math.hypot(x - from.x, y - from.y);
+    const duration = Math.round(Math.min(450, Math.max(80, (40 + Math.sqrt(distance) * 4) * 2.5)));
     state.cursor?.classList.add('on');
     state.anim?.cancel();
-    const from = { x: state.x, y: state.y };
+    
+    state.x = x; state.y = y;
+    globalThis[POS_KEY] = { x, y };
+
+    // 后台/非激活页面：跳过动画直接瞬移，防止动画阻塞
+    if (document.visibilityState !== 'visible') {
+      setCursor(x, y);
+      return Promise.resolve();
+    }
+
     const anim = state.cursor?.animate(
       [
         { transform: `translate3d(${from.x - 5}px, ${from.y - 10}px, 0)` },
@@ -96,11 +111,13 @@ _INSTALL_JS = r"""
       ],
       { duration, easing: EASING, fill: 'forwards' }
     ) || null;
-    state.x = x; state.y = y;
     if (!anim) return Promise.resolve();
     state.anim = anim;
-    // cancel/被新动画覆盖 → finished reject（AbortError）→ resolve，不阻塞等待方
-    return anim.finished.catch(() => {});
+
+    // 双重保底：动画完成或定时器到达（防止后台 tab 下 anim.finished 被浏览器挂起）
+    const animP = anim.finished.catch(() => {});
+    const timerP = new Promise(r => setTimeout(r, duration + 20));
+    return Promise.race([animP, timerP]);
   }
   function target(x, y, w, h) {
     // 显示目标高亮框（呼吸动画）+ 光标移动到元素中心（动画完成后 resolve）
@@ -123,7 +140,11 @@ _INSTALL_JS = r"""
     rip.style.left = x + 'px';
     rip.style.top = y + 'px';
     state.root.appendChild(rip);
-    setTimeout(() => rip.remove(), 600);
+    const tid = setTimeout(() => {
+      rip.remove();
+      state.timers.delete(tid);
+    }, 600);
+    state.timers.add(tid);
   }
   function clickAt(x, y) {
     // 点击反馈：光标已到位（距离 <1px）直接波纹（无抖动）；否则先移动完成再波纹
@@ -135,12 +156,14 @@ _INSTALL_JS = r"""
     return moveTo(x, y).then(() => createRipple(x, y));
   }
   function clear() {
-    // 交互完成：全部特效图层从 DOM 移除
+    // 交互完成：全部特效图层从 DOM 移除，清理全部定时器与动画；保留全局坐标持久态
     state.anim?.cancel();
     state.anim = null;
+    for (const tid of state.timers) clearTimeout(tid);
+    state.timers.clear();
     state.host?.remove();
     state.host = null; state.root = null; state.cursor = null; state.highlight = null;
-    state.x = 0; state.y = 0;
+    // 保留 state.x / state.y 与 globalThis[POS_KEY]，不重置为 (0,0)
   }
   globalThis[KEY] = { mount, moveTo, target, clickAt, clear, version: 2 };
   mount();
@@ -161,25 +184,57 @@ class VirtualCursor:
 
     @staticmethod
     async def attach(page) -> None:
-        """注入特效层（幂等）。"""
-        await page.evaluate(_INSTALL_JS)
+        """注入特效层（幂等，带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(page.evaluate(_INSTALL_JS), timeout=0.5)
+        except Exception:
+            pass
 
     @staticmethod
     async def target(page, x: float, y: float, w: float, h: float) -> None:
-        """高亮目标元素（呼吸框）+ 光标移动到元素中心。"""
-        await page.evaluate(_invoke(f"globalThis[{_key()}].target({x}, {y}, {w}, {h})"))
+        """高亮目标元素（呼吸框）+ 光标移动到元素中心（带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                page.evaluate(_invoke(f"globalThis[{_key()}].target({x}, {y}, {w}, {h})")),
+                timeout=0.6,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     async def move_to(page, x: float, y: float) -> None:
-        """光标平滑移动到视口坐标 (x, y)。"""
-        await page.evaluate(_invoke(f"globalThis[{_key()}].moveTo({x}, {y})"))
+        """光标平滑移动到视口坐标 (x, y)（带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                page.evaluate(_invoke(f"globalThis[{_key()}].moveTo({x}, {y})")),
+                timeout=0.6,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     async def click_at(page, x: float, y: float) -> None:
-        """光标移动到位并显示点击波纹。"""
-        await page.evaluate(_invoke(f"globalThis[{_key()}].clickAt({x}, {y})"))
+        """光标移动到位并显示点击波纹（带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                page.evaluate(_invoke(f"globalThis[{_key()}].clickAt({x}, {y})")),
+                timeout=0.6,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     async def clear(page) -> None:
-        """交互完成：从 DOM 移除全部特效图层。"""
-        await page.evaluate(_invoke(f"globalThis[{_key()}]?.clear()"))
+        """交互完成：从 DOM 移除全部特效图层（带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                page.evaluate(_invoke(f"globalThis[{_key()}]?.clear()")),
+                timeout=0.3,
+            )
+        except Exception:
+            pass

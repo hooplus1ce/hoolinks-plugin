@@ -149,13 +149,12 @@ SCM_BASE_URL=https://scm.example.com
 
 ### 第 4 步：Agent 自动编排的工具链（实际调用序列）
 
-1. `browser_connect`（mode=auto）——接管 9222 已打开的浏览器
-2. `session_create`（name="reg"）——建会话
-3. `login_with_captcha`（account="admin"）——从 accounts.json 取凭据 → 自动请求验证码 → OCR 识别 → 登录 → cookies 注入 → 跳转工作台
-4. `analyze_current_page`——解析页面元素与 iframe 路径，拿到语义定位信息
-5. `page_interact` / `vtable_get_cell_text` / `vtable_get_column_values`——在排产表格上按行/列取数断言（VTable canvas 场景）
-6. `session_save_state`——登录态落盘 `.auth/reg.json`，下次免验证码复用
-7. `export_session`——步骤级证据 JSON 落盘 `WORK_DIR/evidence_assets/`，Excel 用例报表落盘 `WORK_DIR/output_testcases/`
+1. `browser_connect`（mode=auto）——默认接管 9222 端口已打开的浏览器并自动初始化默认会话（一步完成连接+建会话+接管激活页）
+2. `login_with_captcha`（account="admin"）——从 accounts.json 取凭据 → 自动请求验证码 → 视觉识别 → 登录 → cookies 注入 → 跳转工作台
+3. `analyze_current_page`——解析页面元素与 iframe 路径，拿到语义定位信息
+4. `page_interact` / `vtable_get_cell_text` / `vtable_get_column_values`——在排产表格上按行/列取数断言（VTable canvas 场景）
+5. `session_save_state`——登录态落盘 `.auth/reg.json`，下次免验证码复用
+6. `export_session`——步骤级证据 JSON 落盘 `WORK_DIR/evidence_assets/`，Excel 用例报表落盘 `WORK_DIR/output_testcases/`
 
 ### 第 5 步：产出物
 

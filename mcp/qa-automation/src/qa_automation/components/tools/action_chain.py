@@ -97,6 +97,14 @@ async def _is_css_nth_visible(page, attempt: dict) -> bool:
         return True
 
 
+async def _safe_box(locator, timeout: int = 100) -> dict | None:
+    """安全获取元素外接框（毫秒级超快超时，未就绪立即返回 None，绝不阻塞 30s）。"""
+    try:
+        return await locator.bounding_box(timeout=timeout)
+    except Exception:
+        return None
+
+
 async def _run_single(page, act: dict, visualize: bool) -> None:
     """单个动作执行体：定位（含坐标）+ 动作分发（对齐 page_interact 语义）。"""
     action = str(act.get("action", "")).lower()
@@ -147,6 +155,7 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
             raise ValueError(f"action {action!r} not supported in coordinate mode")
         return
 
+    action_timeout = int(act.get("timeout_ms") or 1_500)
     locator = await _resolve_locator(
         page,
         role=act.get("role"),
@@ -157,21 +166,22 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
         xpath=act.get("xpath"),
     )
     if action == "click":
-        try:
-            box = await locator.bounding_box()
-            if visualize and box is not None:
-                try:
-                    from qa_automation.browser.visual import VirtualCursor
+        box = await _safe_box(locator, timeout=100)
+        if visualize and box is not None:
+            try:
+                from qa_automation.browser.visual import VirtualCursor
 
-                    # 目标高亮（呼吸框）+ 光标移动到元素中心
-                    await VirtualCursor.target(
-                        page, box["x"], box["y"], box["width"], box["height"]
-                    )
-                except Exception:  # noqa: BLE001 - 特效失败不影响交互
-                    pass
-            await locator.click(timeout=int(act.get("timeout_ms", 3_000)))
+                # 目标高亮（呼吸框）+ 光标移动到元素中心
+                await VirtualCursor.target(
+                    page, box["x"], box["y"], box["width"], box["height"]
+                )
+            except Exception:  # noqa: BLE001 - 特效失败不影响交互
+                pass
+        try:
+            await locator.click(timeout=action_timeout)
         except Exception:
-            box = await locator.bounding_box()
+            if box is None:
+                box = await _safe_box(locator, timeout=100)
             if box is None:
                 raise
             if visualize:
@@ -187,7 +197,7 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                     pass
             await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     elif action == "dblclick":
-        box = await locator.bounding_box()
+        box = await _safe_box(locator, timeout=100)
         if visualize and box is not None:
             try:
                 from qa_automation.browser.visual import VirtualCursor
@@ -197,9 +207,9 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                 )
             except Exception:  # noqa: BLE001
                 pass
-        await locator.dblclick()
+        await locator.dblclick(timeout=action_timeout)
     elif action == "rightclick":
-        box = await locator.bounding_box()
+        box = await _safe_box(locator, timeout=100)
         if visualize and box is not None:
             try:
                 from qa_automation.browser.visual import VirtualCursor
@@ -209,9 +219,9 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                 )
             except Exception:  # noqa: BLE001
                 pass
-        await locator.click(button="right")
+        await locator.click(button="right", timeout=action_timeout)
     elif action == "hover":
-        box = await locator.bounding_box()
+        box = await _safe_box(locator, timeout=100)
         if visualize and box is not None:
             try:
                 from qa_automation.browser.visual import VirtualCursor
@@ -223,7 +233,7 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                 )
             except Exception:  # noqa: BLE001
                 pass
-        await locator.hover()
+        await locator.hover(timeout=action_timeout)
     elif action == "fill":
         if act.get("value") is None:
             raise ValueError("fill 动作必须提供 value")
@@ -259,15 +269,14 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
         else:
             await locator.select_option(str(act.get("value", "")))
     elif action == "press":
-        key = act.get("key")
+        key = act.get("key") or act.get("value")
         if not key:
             raise ValueError("press 动作必须提供 key")
-        await locator.press(str(key))
+        await locator.press(str(key), timeout=action_timeout)
     elif action == "check":
-        await locator.check()
+        await locator.check(timeout=action_timeout)
     elif action == "uncheck":
-        await locator.uncheck()
-
+        await locator.uncheck(timeout=action_timeout)
 
 @tool(
     title="Chain: Execute Actions",
@@ -306,78 +315,87 @@ async def execute_action_chain(
     except Exception as exc:
         return _err(exc)
 
-    if visualize:
-        try:
-            from qa_automation.browser.visual import VirtualCursor
-
-            await VirtualCursor.attach(page)
-        except Exception:  # noqa: BLE001
-            visualize = False
-
-    url_before = page.url
-    executed = 0
-    failed: list[dict] = []
-    tried_total = 0
-    try:
-        for i, act in enumerate(actions):
-            action = str(act.get("action", "")).lower()
-            attempts: list[dict] = [
-                act,
-                *(act.get("fallbacks") or []),
-                *build_action_fallbacks(act),
-            ]
-            last_err: Exception | None = None
-            tried = 0
-            seen: set[str] = set()
-            step_failed = False
-            for attempt in attempts:
-                key = _action_key(attempt)
-                if key in seen:
-                    continue
-                seen.add(key)
-                if not await _is_css_nth_visible(page, attempt):
-                    continue
-                tried += 1
-                try:
-                    await _run_single(page, attempt, visualize)
-                    break
-                except Exception as exc:  # noqa: BLE001
-                    last_err = exc
-            else:
-                step_failed = True
-            if step_failed:
-                err = last_err or RuntimeError("动作缺少有效定位参数")
-                if stop_on_error:
-                    return {
-                        "ok": False,
-                        "error": f"动作链第 {i + 1} 步 ({action}) 失败, 已完成 {executed} 步, "
-                        f"已尝试 {tried} 个定位方案: {err}",
-                        "executed": executed,
-                        "failed": [{"index": i + 1, "action": action, "error": str(err)}],
-                    }
-                failed.append({"index": i + 1, "action": action, "attempts": tried, "error": str(err)})
-            else:
-                executed += 1
-            tried_total += tried
-    finally:
+    async def _do_chain():
         if visualize:
             try:
                 from qa_automation.browser.visual import VirtualCursor
 
-                await VirtualCursor.clear(page)
+                await VirtualCursor.attach(page)
             except Exception:  # noqa: BLE001
                 pass
 
-    # 链尾统一观察：等待弹层/消息出现后检测一次 + URL 变化对比
-    await asyncio.sleep(1.2)
-    observation = await _detect_focus_layer(page)
-    url_changed = page.url != url_before
-    return {
-        "ok": True,
-        "status": "success" if not failed else "partial",
-        "executed": executed,
-        "failed": failed,
-        "url_changed": url_changed,
-        "url": page.url,
-        "observation": observation,
-    }
+        url_before = page.url
+        executed = 0
+        failed: list[dict] = []
+        tried_total = 0
+        try:
+            for i, act in enumerate(actions):
+                action = str(act.get("action", "")).lower()
+                attempts: list[dict] = [
+                    act,
+                    *(act.get("fallbacks") or []),
+                    *build_action_fallbacks(act),
+                ]
+                last_err: Exception | None = None
+                tried = 0
+                seen: set[str] = set()
+                step_failed = False
+                for attempt in attempts:
+                    key = _action_key(attempt)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if not await _is_css_nth_visible(page, attempt):
+                        continue
+                    tried += 1
+                    try:
+                        await _run_single(page, attempt, visualize)
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_err = exc
+                else:
+                    step_failed = True
+                if step_failed:
+                    err = last_err or RuntimeError("动作缺少有效定位参数")
+                    if stop_on_error:
+                        return {
+                            "ok": False,
+                            "error": f"动作链第 {i + 1} 步 ({action}) 失败, 已完成 {executed} 步, "
+                            f"已尝试 {tried} 个定位方案: {err}",
+                            "executed": executed,
+                            "failed": [{"index": i + 1, "action": action, "error": str(err)}],
+                        }
+                    failed.append({"index": i + 1, "action": action, "attempts": tried, "error": str(err)})
+                else:
+                    executed += 1
+                tried_total += tried
+        finally:
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.clear(page)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # 链尾统一观察（极速 0.15s 返回）
+        await asyncio.sleep(0.15)
+        observation = await _detect_focus_layer(page)
+        url_changed = page.url != url_before
+        return {
+            "ok": True,
+            "status": "success" if not failed else "partial",
+            "executed": executed,
+            "failed": failed,
+            "url_changed": url_changed,
+            "url": page.url,
+            "observation": observation,
+        }
+
+    try:
+        # 全局 15s 硬熔断保护，绝对杜绝打满 60s RPC timeout
+        return await asyncio.wait_for(_do_chain(), timeout=15.0)
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "动作链执行超时（超过 15s 硬熔断上限）"}
+    except Exception as exc:
+        return _err(exc)

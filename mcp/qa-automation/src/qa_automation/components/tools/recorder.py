@@ -87,6 +87,13 @@ async def _frame_path(frame) -> list[str]:
     return path
 
 
+def _clean_str(val: Any) -> str | None:
+    if val is None:
+        return None
+    s = str(val).strip()
+    return s if s else None
+
+
 def _locator_meta(
     role: str | None,
     name: str | None,
@@ -95,15 +102,20 @@ def _locator_meta(
     css: str | None,
     xpath: str | None,
 ) -> tuple[str, str, str | None]:
-    """归一化单一定位维度为 (locator_type, locator_value, locator_extra)。
+    """归一化单一定位维度为 (locator_type, locator_value, locator_extra)。"""
+    role = _clean_str(role)
+    name = _clean_str(name)
+    text = _clean_str(text)
+    placeholder = _clean_str(placeholder)
+    css = _clean_str(css)
+    xpath = _clean_str(xpath)
 
-    优先级对齐 _resolve_locator 的语义定位优先级（role > text > placeholder
-    > xpath > css）；无维度时抛 ValueError（交由 _err 收敛为 {"ok": False}）。
-    """
     if role is not None:
         return "role", role, name
     if text is not None:
         return "text", text, None
+    if name is not None:
+        return "text", name, None
     if placeholder is not None:
         return "placeholder", placeholder, None
     if xpath is not None:
@@ -111,7 +123,6 @@ def _locator_meta(
     if css is not None:
         return "css", css, None
     raise ValueError("need one of: role(+name) / text / placeholder / xpath / css / x,y")
-
 
 async def _execute_action(page, frame, locator, action_key: str, value: str | None) -> None:
     """执行单条动作，语义对齐 page_interact（复用 _do_fill_with_visual / _antd_select_option）。"""
@@ -188,8 +199,8 @@ async def start_recording(
 )
 async def execute_and_record(
     ctx: Context,
-    action: str,
-    description: str,
+    action: str = "click",
+    description: str = "",
     role: str | None = None,
     name: str | None = None,
     text: str | None = None,
@@ -206,24 +217,36 @@ async def execute_and_record(
     """执行单条动作并记录步骤。
 
     Args:
-        action: click/fill/select/hover/dblclick/rightclick/press。
-        description: 步骤的业务描述。
-        role/name: 语义定位（get_by_role；name 取 analyze_current_page 返回的真实值）。
-        text/placeholder/xpath/css: 备选定位维度（每次仅提供一个）。
-        x/y: 视口绝对坐标（坐标模式，与定位参数互斥）。
-        value: fill/select/press 的输入值。
-        expected_result: 预期结果（缺省导出时填默认值）。
-        session: 目标会话名（多账号场景显式指定；缺省用激活会话）。
-        in_iframe: 是否在激活 iframe 内查找（默认 true）。
+        action: 动作类型，支持 click/fill/select/hover/dblclick/rightclick/press（默认 click）。
+        description: 该步骤的业务含义描述（如 '点击查询按钮'）。
+        role: 元素语义角色（如 button, textbox, combobox, option 等）。
+        name: 元素可访问名称（与 role 搭配使用，如 '新 增'）。
+        text: 按可见文本定位。
+        placeholder: 按输入框占位符定位。
+        css: CSS 选择器定位（结构兜底）。
+        xpath: XPath 表达式定位（结构兜底）。
+        x: 视口绝对横坐标（坐标模式）。
+        y: 视口绝对纵坐标（坐标模式）。
+        value: fill/select/press 动作所需的输入或选择值。
+        expected_result: 该步骤预期达到的结果描述。
+        session: 目标会话名（多账号场景显式指定；缺省使用当前激活会话）。
+        in_iframe: 是否在激活 iframe 内查找元素（默认 true）。
     """
     session_data = await ctx.get_state(SESSION_KEY)
     if not session_data:
-        return {"ok": False, "error": "no active recording session; call start_recording first"}
-    session = RecordingSession.model_validate(session_data)
-
+        # 自动创建缺省录制会话，防止直接调用时报错
+        rec_session = RecordingSession(
+            flow_name="default_flow",
+            system_under_test="SCM",
+            description="Auto-created recording session",
+        )
+        await ctx.set_state(SESSION_KEY, rec_session.model_dump())
+    else:
+        rec_session = RecordingSession.model_validate(session_data)
+    session_name = session  # 原始会话名（str|None），避免被 RecordingSession 对象遮蔽
     lc = _lifecycle(ctx)
     try:
-        page = await lc.page(session)
+        page = await lc.page(session_name)
     except Exception as exc:
         return _err(exc)
 
@@ -264,7 +287,7 @@ async def execute_and_record(
     except Exception as exc:
         return _err(exc)
 
-    step_num = len(session.steps) + 1
+    step_num = len(rec_session.steps) + 1
     new_step = FlowStep(
         step_number=step_num,
         action=action_key,
@@ -276,8 +299,8 @@ async def execute_and_record(
         description=description,
         expected_result=expected_result,
     )
-    session.steps.append(new_step)
-    await ctx.set_state(SESSION_KEY, session.model_dump())
+    rec_session.steps.append(new_step)
+    await ctx.set_state(SESSION_KEY, rec_session.model_dump())
 
     return {
         "ok": True,
@@ -287,7 +310,7 @@ async def execute_and_record(
         "locator_value": locator_value,
         "locator_extra": locator_extra,
         "frame_path": frame_path,
-        "total_steps": len(session.steps),
+        "total_steps": len(rec_session.steps),
     }
 
 

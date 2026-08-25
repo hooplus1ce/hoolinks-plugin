@@ -17,6 +17,13 @@ async def launched() -> PlaywrightLifecycle:
     await lc.close()
 
 
+@pytest.fixture
+async def attached(cdp_url: str) -> PlaywrightLifecycle:
+    lc = PlaywrightLifecycle()
+    await lc.attach(cdp_url=cdp_url)
+    yield lc
+    await lc.close()
+
 async def test_launch_roundtrip(launched: PlaywrightLifecycle) -> None:
     await launched.create_session("s1", use_default=False)
     page = await launched.page("s1")
@@ -26,52 +33,62 @@ async def test_launch_roundtrip(launched: PlaywrightLifecycle) -> None:
     assert launched.mode == "launch"
 
 
-async def test_session_cookie_isolation(launched: PlaywrightLifecycle) -> None:
-    await launched.create_session("a", use_default=False)
-    await launched.create_session("b", use_default=False)
-    ctx_a: BrowserContext = launched._sessions["a"].context
-    ctx_b: BrowserContext = launched._sessions["b"].context
+async def test_ensure_session(attached: PlaywrightLifecycle) -> None:
+    session1 = await attached.ensure_session("ens", use_default=False)
+    assert session1.name == "ens"
+    assert attached.active_session_name == "ens"
+    assert attached.has_session("ens") is True
+    # 再次调用 ensure_session：幂等返回已有会话
+    session2 = await attached.ensure_session("ens", use_default=False)
+    assert session2 is session1
+    assert attached.active_session_name == "ens"
+
+
+async def test_session_cookie_isolation(attached: PlaywrightLifecycle) -> None:
+    await attached.create_session("a", use_default=False)
+    await attached.create_session("b", use_default=False)
+    ctx_a: BrowserContext = attached._sessions["a"].context
+    ctx_b: BrowserContext = attached._sessions["b"].context
     await ctx_a.add_cookies([{"name": "session", "value": "a", "url": COOKIE_URL}])
     await ctx_b.add_cookies([{"name": "session", "value": "b", "url": COOKIE_URL}])
     assert (await ctx_a.cookies(COOKIE_URL))[0]["value"] == "a"
     assert (await ctx_b.cookies(COOKIE_URL))[0]["value"] == "b"
 
 
-async def test_switch_and_close_session(launched: PlaywrightLifecycle) -> None:
-    await launched.create_session("a", use_default=False)
-    await launched.create_session("b", use_default=False)
-    assert launched.active_session_name == "b"
-    await launched.switch_session("a")
-    assert launched.active_session_name == "a"
-    await launched.close_session("a")
-    assert "a" not in {s["name"] for s in launched.sessions()}
-    assert launched.active_session_name == "b"
+async def test_switch_and_close_session(attached: PlaywrightLifecycle) -> None:
+    await attached.create_session("a", use_default=False)
+    await attached.create_session("b", use_default=False)
+    assert attached.active_session_name == "b"
+    await attached.switch_session("a")
+    assert attached.active_session_name == "a"
+    await attached.close_session("a")
+    assert "a" not in {s["name"] for s in attached.sessions()}
+    assert attached.active_session_name == "b"
 
 
 async def test_storage_state_roundtrip(
-    launched: PlaywrightLifecycle, tmp_path
-) -> None:
-    await launched.create_session("a", use_default=False)
-    ctx_a = launched._sessions["a"].context
+    attached: PlaywrightLifecycle, tmp_path
+)-> None:
+    await attached.create_session("a", use_default=False)
+    ctx_a = attached._sessions["a"].context
     await ctx_a.add_cookies([{"name": "token", "value": "abc", "url": COOKIE_URL}])
     state = tmp_path / "state.json"
-    await launched.save_storage_state("a", state)
-    await launched.create_session("b", storage_state=str(state), use_default=False)
-    ctx_b = launched._sessions["b"].context
+    await attached.save_storage_state("a", state)
+    await attached.create_session("b", storage_state=str(state), use_default=False)
+    ctx_b = attached._sessions["b"].context
     assert (await ctx_b.cookies(COOKIE_URL))[0]["value"] == "abc"
 
 
-async def test_error_paths(launched: PlaywrightLifecycle) -> None:
+async def test_error_paths(attached: PlaywrightLifecycle) -> None:
     with pytest.raises(SessionError):
-        await launched.page()  # 无会话
-    await launched.create_session("s", use_default=False)
+        await attached.page()  # 无会话
+    await attached.create_session("s", use_default=False)
     with pytest.raises(SessionError):
-        await launched.create_session("s")  # 重名
+        await attached.create_session("s")  # 重名
     with pytest.raises(SessionError):
-        await launched.switch_session("nope")
+        await attached.switch_session("nope")
     with pytest.raises(SessionError):
-        await launched.close_session("nope")
-
+        await attached.close_session("nope")
 
 async def test_not_connected() -> None:
     lc = PlaywrightLifecycle()

@@ -25,7 +25,7 @@ CHROME_CANDIDATES = (
 )
 
 
-def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+def _port_open(host: str, port: int, timeout: float = 0.05) -> bool:
     with socket.socket() as s:
         s.settimeout(timeout)
         try:
@@ -41,13 +41,16 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-async def _spawn_debug_chrome() -> str | None:
+@pytest.fixture(scope="session")
+def session_cdp_server() -> str | None:
+    """Session 级别的 CDP 端点提供器：启动独立无扩展无头 Chrome 实例供整个测试套件复用。"""
     exe = next((p for p in CHROME_CANDIDATES if p.exists()), None)
     if exe is None:
-        return None
+        yield None
+        return
+
     port = _free_port()
-    profile = tempfile.mkdtemp(prefix="pw-attach-test-")
-    # 有头窗口会在用户屏幕上弹出并被测试强杀，造成"浏览器被关闭"观感——固定无头。
+    profile = tempfile.mkdtemp(prefix="pw-attach-session-")
     proc = subprocess.Popen(
         [
             str(exe),
@@ -57,41 +60,35 @@ async def _spawn_debug_chrome() -> str | None:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    for _ in range(50):
-        if _port_open("127.0.0.1", port):
+    for _ in range(60):
+        if _port_open("127.0.0.1", port, timeout=0.05):
             break
-        time.sleep(0.2)
-    if not _port_open("127.0.0.1", port):
+        time.sleep(0.05)
+
+    if not _port_open("127.0.0.1", port, timeout=0.05):
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
         shutil.rmtree(profile, ignore_errors=True)
-        return None
-    _spawn_debug_chrome._cleanup = (proc, profile)  # type: ignore[attr-defined]
-    return f"http://127.0.0.1:{port}"
-
-
-@pytest_asyncio.fixture
-async def cdp_url() -> str:
-    """CDP 端点：9222 真实可 attach 则用之；否则自启临时无头 Chrome 兜底。"""
-    probe = PlaywrightLifecycle()
-    try:
-        await probe.attach(timeout_ms=5_000)
-    except Exception:
-        await probe.close()
-        url = await _spawn_debug_chrome()
-        if url is None:
-            pytest.skip("9222 not attachable and no Chrome executable for fallback")
-        yield url
-        cleanup = getattr(_spawn_debug_chrome, "_cleanup", None)
-        if cleanup:
-            proc, profile = cleanup
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-            shutil.rmtree(profile, ignore_errors=True)
+        yield None
         return
-    else:
-        await probe.close()
-        yield "http://127.0.0.1:9222"
+
+    url = f"http://127.0.0.1:{port}"
+    try:
+        yield url
+    finally:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.fixture
+def cdp_url(session_cdp_server: str | None) -> str:
+    """CDP 端点 fixture（快速复用 session 级干净无头 Chrome 实例）。"""
+    if session_cdp_server is None:
+        pytest.skip("Chrome executable not found for fallback")
+    return session_cdp_server

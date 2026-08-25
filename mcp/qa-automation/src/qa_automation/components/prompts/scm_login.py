@@ -24,8 +24,8 @@ def scm_login(session: str = "scm", base_url: str = DEFAULT_BASE_URL) -> str:
     """
     return f"""请按以下步骤在已打开的浏览器中完成 SCM 系统登录并进入工作台：
 
-1. 调用 browser_connect 连接 http://127.0.0.1:9222 的浏览器（接管已打开的窗口，不要自启新浏览器）。
-2. 调用 session_create 创建会话 "{session}"（默认在可见窗口操作，不要传 use_default=false）。
+1. 调用 browser_connect 连接 http://127.0.0.1:9222 的浏览器并自动初始化会话（接管已打开的窗口，默认创建并激活会话 "{session}"）。
+2. 若需自定义隔离环境，可调用 session_create 创建会话 "{session}"；默认单会话场景第一步已自动就绪。
 3. 调用 login_with_captcha 登录会话 "{session}"：
    - 账号密码从环境变量自动读取（SCM_USERNAME / SCM_USERPWD / SCM_BASE_URL），不要向用户询问；
    - 验证码由工具自动 OCR 识别；若返回验证码类错误，直接重试（工具会自动刷新验证码）。

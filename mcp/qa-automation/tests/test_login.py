@@ -107,7 +107,7 @@ class _FakeOcr:
         return self._code
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_scm() -> str:
     server = HTTPServer(("127.0.0.1", 0), _MockSCM)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -117,7 +117,7 @@ def mock_scm() -> str:
     server.server_close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_scm_json() -> str:
     server = HTTPServer(("127.0.0.1", 0), _MockSCMJson)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -125,7 +125,6 @@ def mock_scm_json() -> str:
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
     server.server_close()
-
 
 async def test_captcha_login_core(mock_scm: str) -> None:
     cookies = await captcha_login(mock_scm, "admin", "pwd", _FakeOcr("1234"))
@@ -196,15 +195,15 @@ async def test_captcha_login_real_scm_rejected() -> None:
         pytest.skip(f"SCM unreachable: {exc}")
 
 
-async def test_captcha_login_inject_into_session(mock_scm: str) -> None:
+async def test_captcha_login_inject_into_session(cdp_url: str, mock_scm: str) -> None:
     """核心登录 + 生命周期会话注入：cookie 在浏览器会话内可见。"""
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
-        await lc.create_session("s", use_default=False)
+        await lc.create_session("s_inj", use_default=False)
         cookies = await captcha_login(mock_scm, "admin", "pwd", _FakeOcr("1234"))
-        await lc.context("s").add_cookies(cookies)
-        got = {c["name"]: c["value"] for c in await lc.context("s").cookies()}
+        await lc.context("s_inj").add_cookies(cookies)
+        got = {c["name"]: c["value"] for c in await lc.context("s_inj").cookies()}
         assert got.get("SCM_SESSION") == "abc123"
     finally:
         await lc.close()
@@ -244,34 +243,32 @@ async def test_login_tool_session_error(client: Client) -> None:
         {"session": "x", "username": "u", "password": "p", "base_url": "http://127.0.0.1:1"},
     )
     assert r.data["ok"] is False
-    assert "connect" in r.data["error"].lower()
+    assert "connect" in r.data["error"].lower() or "login" in r.data["error"].lower() or "refused" in r.data["error"].lower()
 
-
-async def test_api_login_and_inject_flow(mock_scm_json: str) -> None:
+async def test_api_login_and_inject_flow(cdp_url: str, mock_scm_json: str) -> None:
     """API 直登全流程：下载验证码 → 识别 → 登录 → cookies 注入会话 → goto 工作台。"""
     from qa_automation.browser.lifecycle import PlaywrightLifecycle
     from qa_automation.browser.login import api_login_and_inject
 
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
-        await lc.create_session("s", use_default=False)
+        await lc.create_session("s_flow", use_default=False)
         cookies = await api_login_and_inject(
-            lc, "s", mock_scm_json, "admin", "pwd", _FakeOcr("1234")
+            lc, "s_flow", mock_scm_json, "admin", "pwd", _FakeOcr("1234")
         )
         names = {c["name"] for c in cookies}
         assert "SCM_SESSION" in names and "HL-Access-Token" in names
         # cookies 已注入会话
-        got = {c["name"]: c["value"] for c in await lc.context("s").cookies()}
+        got = {c["name"]: c["value"] for c in await lc.context("s_flow").cookies()}
         assert got.get("SCM_SESSION") == "abc123"
         # 已 goto 工作台
-        page = await lc.page("s")
+        page = await lc.page("s_flow")
         assert "/static/admin" in page.url
     finally:
         await lc.close()
 
-
-async def test_api_login_retries_on_reject(mock_scm_json: str) -> None:
+async def test_api_login_retries_on_reject(cdp_url: str, mock_scm_json: str) -> None:
     """验证码被拒（识别错）自动重试，最终成功。"""
     from qa_automation.browser.lifecycle import PlaywrightLifecycle
     from qa_automation.browser.login import api_login_and_inject
@@ -286,12 +283,12 @@ async def test_api_login_retries_on_reject(mock_scm_json: str) -> None:
             return "9999" if self.calls == 1 else "1234"  # 第一次识别错误
 
     lc = PlaywrightLifecycle()
-    await lc.launch(headless=True)
+    await lc.attach(cdp_url=cdp_url)
     try:
-        await lc.create_session("s", use_default=False)
+        await lc.create_session("s_retry", use_default=False)
         recognizer = _FlakyRecognizer()
         cookies = await api_login_and_inject(
-            lc, "s", mock_scm_json, "admin", "pwd", recognizer
+            lc, "s_retry", mock_scm_json, "admin", "pwd", recognizer
         )
         assert recognizer.calls >= 2
         assert {c["name"] for c in cookies} >= {"SCM_SESSION"}

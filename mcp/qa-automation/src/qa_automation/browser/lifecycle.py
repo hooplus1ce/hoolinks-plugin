@@ -260,6 +260,10 @@ class PlaywrightLifecycle:
     def active_session_name(self) -> str | None:
         return self._active
 
+    def has_session(self, name: str) -> bool:
+        """判断指定会话是否存在。"""
+        return name in self._sessions
+
     def sessions(self) -> list[dict[str, Any]]:
         return [
             {
@@ -272,6 +276,31 @@ class PlaywrightLifecycle:
             for s in self._sessions.values()
         ]
 
+    async def ensure_session(
+        self,
+        name: str = "default",
+        storage_state: str | Path | dict | None = None,
+        *,
+        use_default: bool = True,
+        account: str | None = None,
+        **context_options: Any,
+    ) -> Session:
+        """获取或创建命名会话并设为激活状态，同时确保页面就绪。"""
+        self._ensure_connected()
+        if name in self._sessions:
+            self._active = name
+            session = self._sessions[name]
+            await session.ensure_page()
+            return session
+        session = await self.create_session(
+            name=name,
+            storage_state=storage_state,
+            use_default=use_default,
+            account=account,
+            **context_options,
+        )
+        await session.ensure_page()
+        return session
     async def create_session(
         self,
         name: str,
@@ -293,6 +322,14 @@ class PlaywrightLifecycle:
         """
         self._ensure_connected()
         if name in self._sessions:
+            if (
+                name == "default"
+                and use_default is True
+                and storage_state is None
+                and account is None
+            ):
+                self._active = name
+                return self._sessions[name]
             raise SessionError(f"session {name!r} already exists")
         context_opts = dict(context_options)
         if "no_viewport" not in context_opts and "viewport" not in context_opts:

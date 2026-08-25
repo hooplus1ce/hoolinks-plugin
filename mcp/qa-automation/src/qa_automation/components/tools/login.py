@@ -44,7 +44,7 @@ def _recognizer() -> VisionCaptchaRecognizer:
 )
 async def login_with_captcha(
     ctx: Context,
-    session: str,
+    session: str = "default",
     account: str = "",
     username: str | None = None,
     password: str | None = None,
@@ -53,7 +53,7 @@ async def login_with_captcha(
     """SCM API 直登（视觉识别验证码）。
 
     Args:
-        session: 目标会话名（先 session_create；cookies 注入该会话上下文）。
+        session: 目标会话名（缺省使用当前激活会话或 'default' 会话）。
         account: accounts.json 中的账号名（如 admin/operator）；为空时回退
             username/password 显式参数或环境变量 SCM_USERNAME/SCM_USERPWD。
         username: 账号；缺省按 account 读取。
@@ -86,9 +86,15 @@ async def login_with_captcha(
         return {"ok": False, "error": "missing base_url (accounts.json or SCM_BASE_URL)"}
 
     lc = ctx.lifespan_context["lifecycle"]
+    if not lc.is_connected:
+        await lc.connect("auto")
+    target_session = session or lc.active_session_name or "default"
+    if not lc.has_session(target_session):
+        await lc.ensure_session(target_session, use_default=True)
+
     try:
         cookies = await api_login_and_inject(
-            lc, session, base_url, username, password, _recognizer()
+            lc, target_session, base_url, username, password, _recognizer()
         )
     except Exception as exc:
         return {"ok": False, "error": f"login failed: {type(exc).__name__}: {exc}"}

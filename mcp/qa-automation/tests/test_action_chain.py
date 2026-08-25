@@ -60,101 +60,111 @@ async def client() -> Client:
         yield c
 
 
-async def _setup(client: Client, page_html: str) -> None:
-    await client.call_tool("browser_connect", {"mode": "launch", "headless": True})
+async def _setup(client: Client, cdp_url: str, page_html: str) -> None:
+    await client.call_tool("browser_connect", {"mode": "attach", "cdp_url": cdp_url})
     await client.call_tool("session_create", {"name": "ch", "use_default": False})
     await client.call_tool("page_goto", {"url": "data:text/html," + page_html, "session": "ch"})
 
 
-async def test_chain_multi_step_unified_observation(client: Client) -> None:
+async def test_chain_multi_step_unified_observation(client: Client, cdp_url: str) -> None:
     """多步链：click → fill → click，链尾统一观察一次（最后动作的消息）。"""
-    await _setup(client, _CHAIN_PAGE)
-    r = await client.call_tool(
-        "execute_action_chain",
-        {
-            "session": "ch",
-            "actions": [
-                {"action": "click", "css": "#go"},
-                {"action": "fill", "css": "#i", "value": "abc", "input_method": "type"},
-                {"action": "click", "css": "#ok"},
-            ],
-        },
-    )
-    assert r.data["ok"] is True, r.data
-    assert r.data["status"] == "success"
-    assert r.data["executed"] == 3 and r.data["failed"] == []
-    # 链尾观察捕获最后一步的消息（submit:abc 覆盖 clicked）
-    assert r.data["observation"]["kind"] == "message"
-    assert "submitted:abc" in r.data["observation"]["text"]
-    await client.call_tool("browser_disconnect", {})
+    await _setup(client, cdp_url, _CHAIN_PAGE)
+    try:
+        r = await client.call_tool(
+            "execute_action_chain",
+            {
+                "session": "ch",
+                "actions": [
+                    {"action": "click", "css": "#go"},
+                    {"action": "fill", "css": "#i", "value": "abc", "input_method": "type"},
+                    {"action": "click", "css": "#ok"},
+                ],
+            },
+        )
+        assert r.data["ok"] is True, r.data
+        assert r.data["status"] == "success"
+        assert r.data["executed"] == 3 and r.data["failed"] == []
+        # 链尾观察捕获最后一步的消息（submit:abc 覆盖 clicked）
+        assert r.data["observation"]["kind"] == "message"
+        assert "submitted:abc" in r.data["observation"]["text"]
+    finally:
+        await client.call_tool("session_close", {"name": "ch"})
 
 
-async def test_chain_antd_nth_fallback(client: Client) -> None:
+async def test_chain_antd_nth_fallback(client: Client, cdp_url: str) -> None:
     """antd 常驻 dropdown：主定位 nth=0 命中 hidden 层（预检跳过）→ fallback nth=1 命中可见层。"""
-    await _setup(client, _CHAIN_DROPDOWN_PAGE)
-    r = await client.call_tool(
-        "execute_action_chain",
-        {
-            "session": "ch",
-            "actions": [
-                {"action": "click", "css": "#go"},  # 先确认基础动作
-                {"action": "click", "css": 'li[title="固定改机"] >> nth=0'},  # hidden 层 → 自动降级 nth=1
-            ],
-        },
-    )
-    assert r.data["ok"] is True, r.data
-    assert r.data["executed"] == 2
-    # 链尾观察：visible 层选项被点击
-    assert r.data["observation"]["kind"] == "message"
-    assert "已选择:固定改机" in r.data["observation"]["text"]
-    await client.call_tool("browser_disconnect", {})
+    await _setup(client, cdp_url, _CHAIN_DROPDOWN_PAGE)
+    try:
+        r = await client.call_tool(
+            "execute_action_chain",
+            {
+                "session": "ch",
+                "actions": [
+                    {"action": "click", "css": "#go"},  # 先确认基础动作
+                    {"action": "click", "css": 'li[title="固定改机"] >> nth=0'},  # hidden 层 → 自动降级 nth=1
+                ],
+            },
+        )
+        assert r.data["ok"] is True, r.data
+        assert r.data["executed"] == 2
+        # 链尾观察：visible 层选项被点击
+        assert r.data["observation"]["kind"] == "message"
+        assert "已选择:固定改机" in r.data["observation"]["text"]
+    finally:
+        await client.call_tool("session_close", {"name": "ch"})
 
 
-async def test_chain_stop_on_error_false(client: Client) -> None:
+async def test_chain_stop_on_error_false(client: Client, cdp_url: str) -> None:
     """stop_on_error=False：坏步收集失败继续，好步执行。"""
-    await _setup(client, _CHAIN_PAGE)
-    r = await client.call_tool(
-        "execute_action_chain",
-        {
-            "session": "ch",
-            "actions": [
-                {"action": "click", "css": "#not-exist"},  # 失败
-                {"action": "click", "css": "#go"},  # 成功
-            ],
-            "stop_on_error": False,
-        },
-    )
-    assert r.data["ok"] is True, r.data
-    assert r.data["status"] == "partial"
-    assert r.data["executed"] == 1
-    assert len(r.data["failed"]) == 1 and r.data["failed"][0]["action"] == "click"
-    assert "not-exist" in r.data["failed"][0]["error"]
-    assert r.data["observation"]["kind"] == "message"
-    assert "clicked" in r.data["observation"]["text"]
-    await client.call_tool("browser_disconnect", {})
+    await _setup(client, cdp_url, _CHAIN_PAGE)
+    try:
+        r = await client.call_tool(
+            "execute_action_chain",
+            {
+                "session": "ch",
+                "actions": [
+                    {"action": "click", "css": "#not-exist"},  # 失败
+                    {"action": "click", "css": "#go"},  # 成功
+                ],
+                "stop_on_error": False,
+            },
+        )
+        assert r.data["ok"] is True, r.data
+        assert r.data["status"] == "partial"
+        assert r.data["executed"] == 1
+        assert len(r.data["failed"]) == 1 and r.data["failed"][0]["action"] == "click"
+        assert "not-exist" in r.data["failed"][0]["error"]
+        assert r.data["observation"]["kind"] == "message"
+        assert "clicked" in r.data["observation"]["text"]
+    finally:
+        await client.call_tool("session_close", {"name": "ch"})
 
 
-async def test_chain_stop_on_error_true(client: Client) -> None:
+async def test_chain_stop_on_error_true(client: Client, cdp_url: str) -> None:
     """stop_on_error=True：首步失败即抛错（含已完成步数）。"""
-    await _setup(client, _CHAIN_PAGE)
-    r = await client.call_tool(
-        "execute_action_chain",
-        {
-            "session": "ch",
-            "actions": [
-                {"action": "click", "css": "#not-exist"},
-                {"action": "click", "css": "#go"},
-            ],
-        },
-    )
-    assert r.data["ok"] is False
-    assert "第 1 步" in r.data["error"] and "已完成 0 步" in r.data["error"]
-    await client.call_tool("browser_disconnect", {})
+    await _setup(client, cdp_url, _CHAIN_PAGE)
+    try:
+        r = await client.call_tool(
+            "execute_action_chain",
+            {
+                "session": "ch",
+                "actions": [
+                    {"action": "click", "css": "#not-exist"},
+                    {"action": "click", "css": "#go"},
+                ],
+            },
+        )
+        assert r.data["ok"] is False
+        assert "第 1 步" in r.data["error"] and "已完成 0 步" in r.data["error"]
+    finally:
+        await client.call_tool("session_close", {"name": "ch"})
 
 
-async def test_chain_empty_actions(client: Client) -> None:
+async def test_chain_empty_actions(client: Client, cdp_url: str) -> None:
     """空动作列表报错。"""
-    await _setup(client, _CHAIN_PAGE)
-    r = await client.call_tool("execute_action_chain", {"session": "ch", "actions": []})
-    assert r.data["ok"] is False and "不能为空" in r.data["error"]
-    await client.call_tool("browser_disconnect", {})
+    await _setup(client, cdp_url, _CHAIN_PAGE)
+    try:
+        r = await client.call_tool("execute_action_chain", {"session": "ch", "actions": []})
+        assert r.data["ok"] is False and "不能为空" in r.data["error"]
+    finally:
+        await client.call_tool("session_close", {"name": "ch"})

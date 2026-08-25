@@ -46,28 +46,39 @@ _SCAN_JS = r"""
   if (!scope) return [];
   const results = [];
   const seen = new Set();
-  const visible = (el) => {
+
+  const isElementVisible = (el) => {
     let cur = el;
     while (cur && cur.nodeType === 1) {
       const cls = String(cur.className || '');
       const st = getComputedStyle(cur);
       if (cur.hidden || cur.getAttribute('aria-hidden') === 'true'
           || /hidden/i.test(cls) || st.display === 'none'
-          || st.visibility === 'hidden' || st.visibility === 'collapse'
-          || Number.parseFloat(st.opacity || '1') === 0) return false;
+          || st.visibility === 'hidden' || st.visibility === 'collapse') return false;
+      if (cur === el && Number.parseFloat(st.opacity || '1') === 0) {
+        return false;
+      }
+      if (cur !== el && Number.parseFloat(st.opacity || '1') === 0) return false;
       cur = cur.parentElement;
     }
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
+
   const getRole = (el) => {
+    // 1. Explicit ARIA role
     const explicit = el.getAttribute('role');
-    if (explicit) return explicit;
+    if (explicit) {
+      if (['radiogroup', 'group', 'toolbar', 'menubar'].includes(explicit)) return null;
+      return explicit;
+    }
+
     const t = el.tagName.toLowerCase();
     if (t === 'button') return 'button';
     if (t === 'a' && el.href) return 'link';
     if (t === 'select') return 'combobox';
     if (t === 'textarea') return 'textbox';
+
     if (t === 'input') {
       const type = (el.type || 'text').toLowerCase();
       if (type === 'checkbox') return 'checkbox';
@@ -76,15 +87,43 @@ _SCAN_JS = r"""
       if (type === 'number') return 'spinbutton';
       if (type === 'range') return 'slider';
       if (type === 'search') return 'searchbox';
+      if (['hidden'].includes(type)) return null;
       return 'textbox';
     }
-    if (el.closest('.ant-switch')) return 'switch';
-    if (el.closest('.ant-checkbox-wrapper')) return 'checkbox';
-    if (el.closest('.ant-radio-wrapper')) return 'radio';
-    if (el.closest('.ant-select-item-option, .ant-select-dropdown-menu-item, .ant-cascader-menu-item, .virtual-option')) return 'option';
+
+    const cls = String(el.className || '');
+    // 包含多个表单项的容器（如 radio-group / checkbox-group）是分组容器，非单独操作项
+    const childInputs = el.querySelectorAll('input, select, textarea');
+    if (childInputs.length > 1 || /(\b|[-_])(group|list|container)(\b|[-_])/i.test(cls)) {
+      return null;
+    }
+
+    // 2. 单个表单项包装层（如 <label> 或 wrapper 内含 1 个 input）
+    if (childInputs.length === 1) {
+      const childType = (childInputs[0].type || 'text').toLowerCase();
+      if (childType === 'radio') return 'radio';
+      if (childType === 'checkbox') return 'checkbox';
+      if (childType === 'file') return 'button';
+      if (['button', 'submit', 'reset'].includes(childType)) return 'button';
+    }
+
+    // 3. 泛化组件类名语义推导（无 native input 的纯 CSS/JS 控件）
+    if (/(\b|[-_])(radio|segmented)([-_]item|[-_]button|[-_]wrapper|\b)/i.test(cls)) return 'radio';
+    if (/(\b|[-_])(checkbox|checkable)([-_]item|[-_]button|[-_]wrapper|\b)/i.test(cls)) return 'checkbox';
+    if (/(\b|[-_])(switch)([-_]item|[-_]wrapper|\b)/i.test(cls)) return 'switch';
+    if (/(\b|[-_])(option|dropdown[-_]item|menu[-_]item|select[-_]item|virtual[-_]option)/i.test(cls)) return 'option';
+    if (/(\b|[-_])(tab)([-_]item|[-_]button|\b)/i.test(cls) && !/tabpane|tabcontent|tabpanel/i.test(cls)) return 'tab';
+    if (/(\b|[-_])(btn|button)([-_]wrapper|\b)/i.test(cls)) return 'button';
+    if (/(\b|[-_])(select|picker|cascader)([-_]wrapper|\b)/i.test(cls)) return 'combobox';
+
+    // 4. 自定义可点击交互节点
+    if (el.getAttribute('onclick') || (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1')) {
+      return 'button';
+    }
+
     return null;
   };
-  const antComponentSel = '.ant-select, .ant-picker, .ant-cascader, .ant-tree-select, .ant-checkbox-wrapper, .ant-radio-wrapper, .ant-switch';
+
   const getName = (el) => {
     const labelledby = el.getAttribute('aria-labelledby');
     if (labelledby) {
@@ -96,13 +135,18 @@ _SCAN_JS = r"""
     }
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) return ariaLabel.trim();
+
     if (el.id) {
       const lab = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
       if (lab && lab.innerText) return lab.innerText.trim();
     }
-    const parentLabel = el.closest('label');
-    if (parentLabel && parentLabel.innerText) return parentLabel.innerText.trim();
-    const antComp = el.closest(antComponentSel);
+
+    const parentLabel = el.matches('label') ? el : el.closest('label');
+    if (parentLabel && parentLabel.innerText) {
+      const txt = parentLabel.innerText.replace(/\s+/g, ' ').trim();
+      if (txt) return txt.slice(0, 80);
+    }
+
     const t = el.tagName.toLowerCase();
     const roleAttr = el.getAttribute('role') || getRole(el) || '';
     const isTextLike = t === 'button' || t === 'a'
@@ -111,16 +155,19 @@ _SCAN_JS = r"""
       const own = (el.innerText || '').replace(/\s+/g, ' ').trim();
       if (own) return own.slice(0, 80);
     }
+
     if (t === 'input' && ['button', 'submit', 'reset'].includes((el.type || '').toLowerCase())) {
       const v = (el.value || '').trim();
       if (v) return v.slice(0, 80);
     }
-    const antInput = antComp ? antComp.querySelector('input[aria-label], input[placeholder], input') : null;
+
+    const childInput = el.querySelector('input[aria-label], input[placeholder], input');
     return (el.getAttribute('placeholder') || el.title
-      || (antInput ? (antInput.getAttribute('aria-label') || antInput.getAttribute('placeholder') || '') : '')
-      || (antComp ? (antComp.innerText || '').replace(/\s+/g, ' ').trim() : '')
+      || (childInput ? (childInput.getAttribute('aria-label') || childInput.getAttribute('placeholder') || childInput.value || '') : '')
+      || (el.innerText || '').replace(/\s+/g, ' ').trim()
     ).trim().slice(0, 80);
   };
+
   const uniqueCss = (el) => {
     const pick = (sel) => {
       try {
@@ -133,48 +180,75 @@ _SCAN_JS = r"""
     if (el.id) return pick('#' + CSS.escape(el.id));
     if (el.name) return pick('[name="' + el.name + '"]');
     if (el.getAttribute('data-testid')) return pick('[data-testid="' + el.getAttribute('data-testid') + '"]');
-    const antRoot = el.matches(antComponentSel) ? el : null;
-    if (antRoot) {
-      const stable = Array.from(antRoot.classList).find(c => /^ant-(select|picker|cascader|tree-select|checkbox-wrapper|radio-wrapper|switch)$/.test(c));
-      if (stable) return pick('.' + stable);
+    if (el.getAttribute('data-qa')) return pick('[data-qa="' + el.getAttribute('data-qa') + '"]');
+
+    const clsList = Array.from(el.classList || [])
+      .filter(c => !/(active|focus|hover|checked|selected|disabled|loading|animating|hidden)/i.test(c));
+    if (clsList.length) {
+      const stableClass = clsList.find(c => /(btn|button|radio|checkbox|switch|select|picker|option|tab|item)/i.test(c)) || clsList[0];
+      if (stableClass) {
+        const candidate = '.' + CSS.escape(stableClass);
+        const res = pick(candidate);
+        if (res.indexOf('nth=') === -1) return res;
+      }
     }
+
     const parts = [];
     let node = el;
-    while (node && node.nodeType === 1 && node !== document.body) {
+    while (node && node.nodeType === 1 && node !== document.body && parts.length < 3) {
       if (node.id) { parts.unshift('#' + CSS.escape(node.id)); break; }
       let sel = node.tagName.toLowerCase();
       const cls = Array.from(node.classList || [])
-        .filter(c => !c.includes('active') && !c.includes('focus') && !c.includes('hover'));
-      if (cls.length) sel += '.' + cls.slice(0, 2).join('.');
+        .filter(c => !/(active|focus|hover|checked|selected|disabled|loading|animating|hidden)/i.test(c));
+      if (cls.length) sel += '.' + CSS.escape(cls[0]);
       parts.unshift(sel);
       node = node.parentElement;
     }
-    return pick(parts.slice(-3).join(' > '));
+    return pick(parts.join(' > '));
   };
-  const selector = 'button, input, select, textarea, a[href], [role="button"], [role="combobox"],'
-    + ' [role="checkbox"], [role="radio"], [role="switch"], [role="textbox"], [role="searchbox"],'
-    + ' [role="spinbutton"], [role="slider"], [role="tab"], [role="menuitem"], [role="option"],'
-    + ' .ant-switch, .ant-select, .ant-picker, .ant-cascader, .ant-tree-select,'
-    + ' .ant-select-item-option, .ant-select-dropdown-menu-item, .ant-cascader-menu-item,'
-    + ' .ant-checkbox-wrapper, .ant-radio-wrapper, .virtual-option';
+
+  const selector = [
+    'button', 'input:not([type="hidden"])', 'select', 'textarea', 'a[href]', 'summary',
+    '[role="button"]', '[role="link"]', '[role="checkbox"]', '[role="radio"]',
+    '[role="switch"]', '[role="tab"]', '[role="menuitem"]', '[role="option"]',
+    '[role="combobox"]', '[role="textbox"]', '[role="searchbox"]', '[role="spinbutton"]',
+    '[role="slider"]', '[role="treeitem"]',
+    'label',
+    '[class*="radio"]', '[class*="checkbox"]', '[class*="switch"]', '[class*="segmented"]',
+    '[class*="select"]', '[class*="picker"]', '[class*="cascader"]', '[class*="tree"]',
+    '[class*="dropdown"]', '[class*="option"]', '[class*="virtual-option"]',
+    '[tabindex="0"]'
+  ].join(', ');
+
   scope.querySelectorAll(selector).forEach((el) => {
-    if (!visible(el)) return;
+    if (!isElementVisible(el)) return;
     const role = getRole(el);
     if (!role) return;
+
+    if (el.tagName.toLowerCase() === 'span' || el.tagName.toLowerCase() === 'i') {
+      const parentInteractive = el.parentElement && el.parentElement.closest(selector);
+      if (parentInteractive && isElementVisible(parentInteractive) && getRole(parentInteractive)) {
+        return;
+      }
+    }
+
     const rect = el.getBoundingClientRect();
-    const key = el.tagName + '|' + rect.x + '|' + rect.y;
+    const key = role + '|' + Math.round(rect.x) + '|' + Math.round(rect.y) + '|' + Math.round(rect.width) + '|' + Math.round(rect.height);
     if (seen.has(key)) return;
     seen.add(key);
+
+    const name = getName(el);
     results.push({
       type: el.tagName.toLowerCase(),
       role,
-      name: getName(el),
+      name,
       css: uniqueCss(el),
       input_type: el.tagName.toLowerCase() === 'input' ? (el.getAttribute('type') || 'text') : '',
       cx: rect.x + rect.width / 2,
       cy: rect.y + rect.height / 2,
     });
   });
+
   return results;
 }
 """
@@ -301,12 +375,23 @@ async def _active_iframe_frame(page):
         if await iframe_loc.count() == 0:
             return None
         frame_el = iframe_loc.first
-        name = await frame_el.get_attribute("name") or ""
-        src = await frame_el.get_attribute("src") or ""
+        name = ""
+        src = ""
+        try:
+            name = await frame_el.get_attribute("name", timeout=100) or ""
+        except Exception:
+            pass
+        try:
+            src = await frame_el.get_attribute("src", timeout=100) or ""
+        except Exception:
+            pass
         for f in page.frames:
             if (name and f.name == name) or (not name and src and f.url == src):
                 return f
-        return await frame_el.content_frame()
+        try:
+            return await frame_el.content_frame()
+        except Exception:
+            return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -437,10 +522,24 @@ async def analyze_current_page(
             )
             if await iframe_loc.count() > 0:
                 frame_el = iframe_loc.first
-                box = await frame_el.bounding_box()
-                src = await frame_el.get_attribute("src") or ""
-                fid = await frame_el.get_attribute("id") or ""
-                fname = await frame_el.get_attribute("name") or ""
+                box = None
+                try:
+                    box = await frame_el.bounding_box(timeout=100)
+                except Exception:
+                    pass
+                src, fid, fname = "", "", ""
+                try:
+                    src = await frame_el.get_attribute("src", timeout=100) or ""
+                except Exception:
+                    pass
+                try:
+                    fid = await frame_el.get_attribute("id", timeout=100) or ""
+                except Exception:
+                    pass
+                try:
+                    fname = await frame_el.get_attribute("name", timeout=100) or ""
+                except Exception:
+                    pass
                 iframe_info = {"src": src, "id": fid, "name": fname}
                 frame = None
                 for f in page.frames:
@@ -448,7 +547,10 @@ async def analyze_current_page(
                         frame = f
                         break
                 if frame is None:
-                    frame = await frame_el.content_frame()
+                    try:
+                        frame = await frame_el.content_frame()
+                    except Exception:
+                        frame = None
                 if frame is not None:
                     raw_frame = await frame.evaluate(_SCAN_JS, None)
                     fx = box["x"] if box else 0
