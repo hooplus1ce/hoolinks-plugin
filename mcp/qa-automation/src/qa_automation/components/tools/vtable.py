@@ -315,20 +315,61 @@ async def vtable_drag_column(
 
 @tool(
     title="VTable: Resize Column",
-    description="真实鼠标拖拽：把 col 列宽调整到指定像素值 width。采集列头右边界分隔线位置合成顶层视口坐标，分步拖到目标位置后松开；不使用实例 API 改列宽。col 支持列索引或字段名/列标题。拖拽后重读列宽校验（误差≤2px）；未开启 columnResize 或超出 min/max 边界时给出明确报错。",
+    description="真实鼠标拖拽：把 col / col_field 列宽调整到指定像素值 width。采集列头右边界分隔线位置合成顶层视口坐标，分步拖到目标位置后松开；不使用实例 API 改列宽。col / col_field 支持列索引（0, 1..）或字段名/列标题（如 '规则名称', 'ruleName'）。拖拽后重读列宽校验（误差≤2px）；未开启 columnResize 或超出 min/max 边界时给出明确报错。",
     icons=[_VTABLE_ICON],
     tags={"vtable", "browser", "qa"},
 )
 async def vtable_resize_column(
     ctx: Context,
-    col: int | str,
-    width: int,
+    col: int | str | None = None,
+    col_field: int | str | None = None,
+    column: int | str | None = None,
+    field: int | str | None = None,
+    col_name: int | str | None = None,
+    column_name: int | str | None = None,
+    width: int | None = None,
+    target_width: int | None = None,
+    new_width: int | None = None,
     session: str | None = None,
 ) -> dict:
-    """通过真实鼠标拖拽 VTable 列头分隔线调整列宽。"""
+    """通过真实鼠标拖拽 VTable 列头分隔线调整列宽。
+
+    Args:
+        col: 列标识（列索引或列标题/字段名，如 0 或 '规则名称'）。
+        col_field: 列字段名或列标题别名（如 '规则名称'）。
+        column: 列别名。
+        field: 字段名别名。
+        col_name: 列名别名。
+        column_name: 列名别名。
+        width: 目标像素宽度（如 200）。
+        target_width: 目标宽度别名。
+        new_width: 新宽度别名。
+        session: 目标会话名（多账号场景显式指定；缺省使用当前激活会话）。
+    """
     try:
+        target_col = col
+        if target_col is None:
+            target_col = col_field if col_field is not None else (
+                column if column is not None else (
+                    field if field is not None else (
+                        col_name if col_name is not None else (
+                            column_name
+                        )
+                    )
+                )
+            )
+        target_w = width if width is not None else (
+            target_width if target_width is not None else (
+                new_width
+            )
+        )
+        if target_col is None:
+            return {"ok": False, "error": "缺少列标识参数：请传入 col 或 col_field（列索引或列标题/字段名，如 0 或 '规则名称'）"}
+        if target_w is None:
+            return {"ok": False, "error": "缺少目标列宽参数：请传入 width（目标像素宽度，如 200）"}
+
         host, page = await _vtable_host(ctx, session)
-        result = await vt.resize_column(host, page, col, width)
+        result = await vt.resize_column(host, page, target_col, int(target_w))
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)

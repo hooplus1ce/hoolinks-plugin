@@ -263,7 +263,7 @@ async def _click_option_in(dropdown, option_text: str) -> bool:
     for role in ("option", "menuitem"):
         role_opt = dropdown.get_by_role(role, name=option_text, exact=True).first
         if await role_opt.count() > 0:
-            await role_opt.click()
+            await role_opt.click(timeout=1000)
             return True
 
     candidates = dropdown.locator(
@@ -281,7 +281,7 @@ async def _click_option_in(dropdown, option_text: str) -> bool:
     )
     exact_idx = [i for i, t in enumerate(texts) if t == option_text]
     if len(exact_idx) == 1:
-        await candidates.nth(exact_idx[0]).click()
+        await candidates.nth(exact_idx[0]).click(timeout=1000)
         return True
     if len(exact_idx) > 1:
         raise RuntimeError(
@@ -291,7 +291,7 @@ async def _click_option_in(dropdown, option_text: str) -> bool:
 
     sub_idx = [i for i, t in enumerate(texts) if t and option_text in t]
     if len(sub_idx) == 1:
-        await candidates.nth(sub_idx[0]).click()
+        await candidates.nth(sub_idx[0]).click(timeout=1000)
         return True
     if len(sub_idx) > 1:
         raise RuntimeError(
@@ -1264,13 +1264,21 @@ async def page_interact(
                 in_iframe=in_iframe,
                 return_frame=True,
             )
-            is_antd = await locator.evaluate(
-                "el => !!el.closest('.ant-select, .ant-cascader, .ant-tree-select')"
-            )
+            if await locator.count() == 0:
+                return {"ok": False, "error": f"未找到下拉框目标元素: role={role}, name={name}, css={css}, text={text}"}
+            try:
+                is_antd = await asyncio.wait_for(
+                    locator.first.evaluate(
+                        "el => !!el.closest('.ant-select, .ant-cascader, .ant-tree-select')"
+                    ),
+                    timeout=1.0,
+                )
+            except Exception:
+                is_antd = False
             if is_antd:
                 await _antd_select_option(page, frame, locator, value)
             else:
-                await locator.select_option(value)
+                await locator.select_option(value, timeout=timeout_ms)
         elif action == "press":
             if value is None:
                 return {"ok": False, "error": "press requires value"}

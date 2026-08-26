@@ -483,6 +483,31 @@ async def test_upload_file_direct_and_antd_wrapper(client: Client, cdp_url: str,
             {"session": "up", "css": "#f1", "file_path": "auto_test_mock.xlsx"},
         )
         assert r4.data["ok"] is True, r4.data
+
+        # 5. 传入 filename 别名
+        r5 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "css": "#f1", "filename": "auto_test_mock.xlsx"},
+        )
+        assert r5.data["ok"] is True, r5.data
+
+        # 6. 不传文件参数时自动缺省生成并使用测试模板
+        r6 = await client.call_tool(
+            "upload_file",
+            {"session": "up", "css": "#f1"},
+        )
+        assert r6.data["ok"] is True, r6.data
     finally:
         await client.call_tool("session_close", {"name": "up"})
         await client.call_tool("browser_disconnect", {})
+
+
+async def test_vtable_resize_column_missing_args(client: Client) -> None:
+    """vtable_resize_column 缺失参数时给出明确中文诊断，而非原生 schema 崩溃。"""
+    r1 = await client.call_tool("vtable_resize_column", {})
+    assert r1.data["ok"] is False
+    assert "缺少" in r1.data["error"]
+
+    r2 = await client.call_tool("vtable_resize_column", {"col": "规则名称"})
+    assert r2.data["ok"] is False
+    assert "缺少" in r2.data["error"]

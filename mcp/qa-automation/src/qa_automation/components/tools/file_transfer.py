@@ -49,12 +49,13 @@ def _resolve_download_dir(download_dir: str | None) -> str:
     return path
 
 
-def _resolve_upload_paths(file_paths: list[str] | str) -> list[str]:
+def _resolve_upload_paths(file_paths: list[str] | str | None) -> list[str]:
     """上传文件路径解析：相对路径优先基于 WORK_DIR，其次进程 cwd 与项目根；支持自动生成测试素材兜底。"""
-    if isinstance(file_paths, str):
-        file_paths = [file_paths]
     if not file_paths:
-        raise RuntimeError("file_paths 不能为空")
+        file_paths = ["auto_test_mock.xlsx"]
+    if isinstance(file_paths, str):
+        # 支持逗号分隔的多文件字符串
+        file_paths = [p.strip() for p in file_paths.split(",") if p.strip()] or ["auto_test_mock.xlsx"]
     resolved: list[str] = []
     missing: list[str] = []
     for p in file_paths:
@@ -322,6 +323,9 @@ async def upload_file(
     path: str | list[str] | None = None,
     file: str | list[str] | None = None,
     files: list[str] | str | None = None,
+    filename: str | None = None,
+    file_name: str | None = None,
+    value: str | None = None,
     session: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -332,15 +336,18 @@ async def upload_file(
     success_text: str | None = None,
     wait_timeout_ms: int = 15000,
 ) -> dict:
-    """上传文件到按钮/输入框，可选等待成功反馈。
+    """上传文件到指定按钮/输入框。支持直接注入 <input type=file>（含 antd .ant-upload 隐藏上传控件）或拦截系统文件选择框（filechooser）注入文件，不弹原生系统选择窗口。
 
     Args:
-        file_paths: 待上传文件路径（支持单文件字符串如 'test.xlsx' 或多文件列表，支持 file_path/filepath/file/path 别名）。
+        file_paths: 待上传文件路径（支持单文件字符串如 'test.xlsx' 或多文件列表，支持 file_path/filepath/file/path/filename/value 等任意别名；缺省自动生成并使用标准测试素材）。
         file_path: 单文件路径别名（与 file_paths 等价）。
         filepath: 文件路径别名。
         path: 文件路径别名。
         file: 单文件别名。
         files: 多文件别名。
+        filename: 文件名别名。
+        file_name: 文件名别名。
+        value: 输入值/文件名别名。
         session: 目标会话名（多账号场景显式指定；缺省使用当前激活会话）。
         role: 按钮/控件语义角色（如 button）。
         name: 按钮/控件可访问名称（如 '导入', '上传文件'）。
@@ -351,9 +358,18 @@ async def upload_file(
         success_text: 上传成功后页面出现的提示文本（如 '导入成功', '上传成功'），指定后轮询等待。
         wait_timeout_ms: success_text 等待上限（毫秒，默认 15000）。
     """
-    target_files = file_paths or file_path or filepath or path or file or files
-    if not target_files:
-        return {"ok": False, "error": "缺少待上传文件参数：请传入 file_paths 或 file_path（如 'import.xlsx'）"}
+    target_files = (
+        file_paths
+        or file_path
+        or filepath
+        or path
+        or file
+        or files
+        or filename
+        or file_name
+        or value
+        or "auto_test_mock.xlsx"
+    )
 
     lc = _lifecycle(ctx)
     try:
@@ -381,7 +397,9 @@ async def upload_file(
 
         # 1. 检查目标元素本身是否是 <input type=file>
         try:
-            is_file_input = await locator.evaluate(
+            if await locator.count() == 0:
+                raise RuntimeError(f"未找到目标上传控件: role={role}, name={name}, css={css}, text={text}")
+            is_file_input = await locator.first.evaluate(
                 "el => el.tagName === 'INPUT' && el.type === 'file'"
             )
         except Exception:
@@ -389,7 +407,6 @@ async def upload_file(
         if is_file_input:
             await locator.set_input_files(paths)
             return {"mode": "set_input_files"}
-
         # 2. 检查目标元素内部或其父容器（如 Antd .ant-upload）是否包含 <input type=file>
         try:
             inner_file = locator.locator('input[type="file"]')

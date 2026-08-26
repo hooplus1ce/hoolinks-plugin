@@ -177,6 +177,9 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
         css=act.get("css"),
         xpath=act.get("xpath"),
     )
+    if await locator.count() == 0:
+        raise RuntimeError(f"未找到目标元素 (count=0): {act}")
+
     if action == "click":
         box = await _safe_box(locator, timeout=100)
         if visualize and box is not None:
@@ -271,15 +274,23 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
             xpath=act.get("xpath"),
             return_frame=True,
         )
-        is_antd = await locator.evaluate(
-            "el => !!el.closest('.ant-select, .ant-cascader, .ant-tree-select')"
-        )
+        if await locator.count() == 0:
+            raise RuntimeError(f"未找到下拉框目标元素: {act}")
+        try:
+            is_antd = await asyncio.wait_for(
+                locator.first.evaluate(
+                    "el => !!el.closest('.ant-select, .ant-cascader, .ant-tree-select')"
+                ),
+                timeout=0.8,
+            )
+        except Exception:
+            is_antd = False
         if is_antd:
             await _antd_select_option(
                 page, frame, locator, str(act.get("value", "")), visualize=visualize
             )
         else:
-            await locator.select_option(str(act.get("value", "")))
+            await locator.select_option(str(act.get("value", "")), timeout=action_timeout)
     elif action == "press":
         key = act.get("key") or act.get("value")
         if not key:
@@ -378,7 +389,7 @@ async def execute_action_chain(
                         continue
                     tried += 1
                     try:
-                        await _run_single(page, attempt, visualize)
+                        await asyncio.wait_for(_run_single(page, attempt, visualize), timeout=3.0)
                         break
                     except Exception as exc:  # noqa: BLE001
                         last_err = exc
