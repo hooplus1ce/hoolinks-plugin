@@ -33,7 +33,7 @@ _INSTALL_JS = r"""
   const POS_KEY = '__qa_mcp_cursor_pos__';
   const CURSOR_IMAGE = %CURSOR_IMAGE%;
   const EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
-  if (globalThis[KEY]?.version === 2) { globalThis[KEY].mount(); return; }
+  if (globalThis[KEY]?.version === 3) { globalThis[KEY].mount(); return; }
   if (globalThis[KEY]) { try { globalThis[KEY].clear(); } catch (_) {} }
 
   const savedPos = globalThis[POS_KEY] || { x: 0, y: 0 };
@@ -45,23 +45,26 @@ _INSTALL_JS = r"""
   function setCursor(x, y) {
     state.x = x; state.y = y;
     globalThis[POS_KEY] = { x, y };
-    if (state.cursor) state.cursor.style.transform = `translate3d(${x - 5}px, ${y - 10}px, 0)`;
+    if (state.cursor) {
+      state.cursor.style.transform = `translate3d(${x - 5}px, ${y - 10}px, 0)`;
+    }
   }
+
   function mount() {
-    if (state.host?.isConnected) return true;
+    if (state.host?.isConnected && state.root) return true;
     document.getElementById(HOST_ID)?.remove();
     const host = document.createElement('div');
     host.id = HOST_ID;
-    host.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none !important;z-index:2147483647;overflow:hidden !important;contain:strict;user-select:none !important;-webkit-user-select:none !important;touch-action:none !important;';
+    host.style.cssText = 'position:fixed !important;inset:0 !important;width:auto !important;height:auto !important;pointer-events:none !important;z-index:2147483647 !important;overflow:hidden !important;contain:strict !important;user-select:none !important;-webkit-user-select:none !important;touch-action:none !important;margin:0 !important;padding:0 !important;border:none !important;';
     const root = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
     style.textContent = `
       :host, * { box-sizing: border-box !important; margin: 0; padding: 0; pointer-events: none !important; user-select: none !important; -webkit-user-select: none !important; }
-      .cursor { position:fixed;left:0;top:0;width:32px;height:32px;display:block;object-fit:contain;opacity:0;pointer-events:none !important;image-rendering:-webkit-optimize-contrast;image-rendering:auto;will-change:transform,opacity;backface-visibility:hidden;transform-style:preserve-3d;transition:opacity 100ms ${EASING}; }
+      .cursor { position:fixed !important;left:0 !important;top:0 !important;width:32px;height:32px;display:block;object-fit:contain;opacity:0;pointer-events:none !important;image-rendering:-webkit-optimize-contrast;image-rendering:auto;will-change:transform,opacity;backface-visibility:hidden;transform-style:preserve-3d;transition:opacity 60ms ease; }
       .cursor.on { opacity: 1; }
-      .highlight { position:fixed;left:0;top:0;box-sizing:border-box !important;min-width:2px;min-height:2px;--accent:#22d3ee;color:var(--accent);border:2px solid currentColor;border-radius:6px;opacity:0;box-shadow:0 0 0 2px rgb(34 211 238 / 20%), 0 0 18px rgb(34 211 238 / 55%);pointer-events:none !important;overflow:visible;will-change:transform,opacity;backface-visibility:hidden;transition:opacity 100ms ${EASING}; }
+      .highlight { position:fixed !important;left:0 !important;top:0 !important;box-sizing:border-box !important;min-width:2px;min-height:2px;--accent:#22d3ee;color:var(--accent);border:2px solid currentColor;border-radius:6px;opacity:0;box-shadow:0 0 0 2px rgb(34 211 238 / 20%), 0 0 18px rgb(34 211 238 / 55%);pointer-events:none !important;overflow:visible;will-change:transform,opacity;backface-visibility:hidden;transition:opacity 60ms ease; }
       .highlight::before { content:'';position:absolute;inset:-5px;box-sizing:border-box !important;border:1px solid currentColor;border-radius:9px;opacity:.48;pointer-events:none !important;will-change:transform,opacity;animation:target-breathe 900ms ease-in-out infinite alternate; }
-      .ripple { position:fixed;left:0;top:0;box-sizing:border-box !important;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #22d3ee;border-radius:50%;pointer-events:none !important;box-shadow:0 0 12px #22d3ee;will-change:transform,opacity;animation:click-ripple 520ms ease-out forwards; }
+      .ripple { position:fixed !important;left:0 !important;top:0 !important;box-sizing:border-box !important;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #22d3ee;border-radius:50%;pointer-events:none !important;box-shadow:0 0 12px #22d3ee;will-change:transform,opacity;animation:click-ripple 400ms ease-out forwards; }
       @keyframes target-breathe { from { transform:scale3d(.985,.985,1); opacity:.3; } to { transform:scale3d(1.025,1.025,1); opacity:.68; } }
       @keyframes click-ripple { from { transform:scale(.35); opacity:1; } to { transform:scale(4.2); opacity:0; } }
       @media (prefers-reduced-motion: reduce) {
@@ -77,29 +80,30 @@ _INSTALL_JS = r"""
     cursor.alt = '';
     cursor.draggable = false;
     root.append(style, highlight, cursor);
-    (document.documentElement || document.body).appendChild(host);
+    const parent = document.documentElement || document.body;
+    parent.appendChild(host);
     state.host = host; state.root = root; state.cursor = cursor; state.highlight = highlight;
-    
-    // 恢复全局保存的最新光标位置（使下一次操作从上一次动作结束点连贯开始）
+
     const curPos = globalThis[POS_KEY] || { x: 0, y: 0 };
     state.x = curPos.x;
     state.y = curPos.y;
     setCursor(state.x, state.y);
     return true;
   }
+
   function moveTo(x, y) {
     mount();
     const from = { x: state.x, y: state.y };
     const distance = Math.hypot(x - from.x, y - from.y);
-    const duration = Math.round(Math.min(450, Math.max(80, (40 + Math.sqrt(distance) * 4) * 2.5)));
+    const duration = Math.round(Math.min(160, Math.max(40, (20 + Math.sqrt(distance) * 2) * 1.5)));
     state.cursor?.classList.add('on');
-    state.anim?.cancel();
-    
-    state.x = x; state.y = y;
-    globalThis[POS_KEY] = { x, y };
 
-    // 后台/非激活页面：跳过动画直接瞬移，防止动画阻塞
-    if (document.visibilityState !== 'visible') {
+    if (state.anim) {
+      try { state.anim.cancel(); } catch(_) {}
+      state.anim = null;
+    }
+
+    if (document.visibilityState !== 'visible' || duration <= 40 || distance < 2) {
       setCursor(x, y);
       return Promise.resolve();
     }
@@ -111,50 +115,70 @@ _INSTALL_JS = r"""
       ],
       { duration, easing: EASING, fill: 'forwards' }
     ) || null;
-    if (!anim) return Promise.resolve();
+
+    if (!anim) {
+      setCursor(x, y);
+      return Promise.resolve();
+    }
     state.anim = anim;
 
-    // 双重保底：动画完成或定时器到达（防止后台 tab 下 anim.finished 被浏览器挂起）
-    const animP = anim.finished.catch(() => {});
-    const timerP = new Promise(r => setTimeout(r, duration + 20));
+    const finish = () => {
+      setCursor(x, y);
+      if (state.anim === anim) {
+        try { anim.cancel(); } catch(_) {}
+        state.anim = null;
+      }
+    };
+
+    const animP = anim.finished.then(finish).catch(finish);
+    const timerP = new Promise(r => {
+      const tid = setTimeout(() => {
+        finish();
+        state.timers.delete(tid);
+        r();
+      }, duration + 10);
+      state.timers.add(tid);
+    });
     return Promise.race([animP, timerP]);
   }
+
   function target(x, y, w, h) {
-    // 显示目标高亮框（呼吸动画）+ 光标移动到元素中心（动画完成后 resolve）
     mount();
     state.cursor?.classList.add('on');
     const hl = state.highlight;
     if (hl) {
-      hl.style.left = x + 'px';
-      hl.style.top = y + 'px';
-      hl.style.width = w + 'px';
-      hl.style.height = h + 'px';
-      hl.style.opacity = 1;
+      hl.style.left = Math.round(x) + 'px';
+      hl.style.top = Math.round(y) + 'px';
+      hl.style.width = Math.round(w) + 'px';
+      hl.style.height = Math.round(h) + 'px';
+      hl.style.opacity = '1';
     }
     return moveTo(x + w / 2, y + h / 2);
   }
+
   function createRipple(x, y) {
     mount();
     const rip = document.createElement('div');
     rip.className = 'ripple';
-    rip.style.left = x + 'px';
-    rip.style.top = y + 'px';
-    state.root.appendChild(rip);
+    rip.style.left = Math.round(x) + 'px';
+    rip.style.top = Math.round(y) + 'px';
+    state.root?.appendChild(rip);
     const tid = setTimeout(() => {
       rip.remove();
       state.timers.delete(tid);
-    }, 600);
+    }, 450);
     state.timers.add(tid);
   }
+
   function clickAt(x, y) {
-    // 点击反馈：光标已到位（距离 <1px）直接波纹（无抖动）；否则先移动完成再波纹
     const dist = Math.hypot(x - state.x, y - state.y);
-    if (dist < 1) {
+    if (dist < 2) {
       createRipple(x, y);
       return Promise.resolve();
     }
     return moveTo(x, y).then(() => createRipple(x, y));
   }
+
   function drag(x1, y1, x2, y2) {
     mount();
     return moveTo(x1, y1)
@@ -166,17 +190,19 @@ _INSTALL_JS = r"""
         createRipple(x2, y2);
       });
   }
+
   function clear() {
     // 交互完成：全部特效图层从 DOM 移除，清理全部定时器与动画；保留全局坐标持久态
-    state.anim?.cancel();
-    state.anim = null;
+    if (state.anim) {
+      try { state.anim.cancel(); } catch(_) {}
+      state.anim = null;
+    }
     for (const tid of state.timers) clearTimeout(tid);
     state.timers.clear();
     state.host?.remove();
     state.host = null; state.root = null; state.cursor = null; state.highlight = null;
-    // 保留 state.x / state.y 与 globalThis[POS_KEY]，不重置为 (0,0)
   }
-  globalThis[KEY] = { mount, moveTo, target, clickAt, drag, clear, version: 2 };
+  globalThis[KEY] = { mount, moveTo, target, clickAt, drag, clear, version: 3 };
   mount();
 })();
 """.replace("%CURSOR_IMAGE%", json.dumps(_CURSOR_IMAGE))
