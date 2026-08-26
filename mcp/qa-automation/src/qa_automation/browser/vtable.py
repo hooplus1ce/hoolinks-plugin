@@ -584,12 +584,8 @@ async def _get_checked_keys(host) -> List[str]:
 
 async def _is_checked(host, record_index: int) -> bool:
     """判断指定行当前是否处于勾选状态。"""
-    keys = await _get_checked_keys(host)
-    return str(record_index) in keys
-
-
 async def select_rows(
-    host, page, row_indexes: List[int], action: str = "check"
+    host, page, row_indexes: list[int], action: str = "check", visualize: bool = False
 ) -> dict:
     """通过真实鼠标点击 VTable canvas 上的复选框来勾选/取消勾选指定行。
 
@@ -714,12 +710,14 @@ async def select_rows(
             # 两次偏移合成页面级坐标 (iframe 相对顶层 + canvas 相对 iframe), 发送真实鼠标点击
             cx = iframe_rect["left"] + located["canvas_rect"]["left"] + (t["rect"]["x1"] + t["rect"]["x2"]) / 2
             cy = iframe_rect["top"] + located["canvas_rect"]["top"] + (t["rect"]["y1"] + t["rect"]["y2"]) / 2
-            logger.info(
-                f"[select_rows] click row={t['record_index']} attempt={attempt + 1} "
-                f"visible={t['visible']} coord=({cx:.1f}, {cy:.1f})"
-            )
-            await page.mouse.click(cx, cy)
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
 
+                    await VirtualCursor.click_at(page, cx, cy)
+                except Exception:
+                    pass
+            await page.mouse.click(cx, cy)
             # 点击后验证: 轮询勾选状态直至预期 (canvas 无 DOM 信号, 状态轮询替代固定 sleep)
             checked_ok = False
             for _ in range(20):
@@ -751,7 +749,7 @@ async def select_rows(
 
 
 async def drag_column(
-    host, page, source: Union[int, str], target: Union[int, str], position: str = "after"
+    host, page, source: Union[int, str], target: Union[int, str], position: str = "after", visualize: bool = False
 ) -> dict:
     """通过真实鼠标拖拽 VTable 列头，把 source 列移动到 target 列的前方/后方。"""
     pos = (position or "after").lower()
@@ -912,6 +910,13 @@ async def drag_column(
 
     async def _select_source_column() -> tuple:
         for px, py in click_points:
+            if visualize:
+                try:
+                    from qa_automation.browser.visual import VirtualCursor
+
+                    await VirtualCursor.click_at(page, px, py)
+                except Exception:
+                    pass
             await page.mouse.click(px, py)
             for _ in range(24):
                 sel = await _run_vtable_js(
@@ -1046,6 +1051,13 @@ async def drag_column(
         f"target=col{target_col}({resolved['targetField']}) position={pos} "
         f"drop=col{drop_col} coord=({drop_cx:.1f}, {drop_cy:.1f}) press=({press_x:.1f}, {press_y:.1f})"
     )
+    if visualize:
+        try:
+            from qa_automation.browser.visual import VirtualCursor
+
+            await VirtualCursor.drag(page, press_x, press_y, drop_cx, drop_cy)
+        except Exception:
+            pass
     await page.mouse.move(press_x, press_y)
     await asyncio.sleep(0.08)
     await page.mouse.down()
@@ -1053,7 +1065,6 @@ async def drag_column(
     await page.mouse.move(drop_cx, drop_cy, steps=14)
     await asyncio.sleep(0.15)
     await page.mouse.up()
-
     after_geom = None
     for _ in range(10):
         after_geom = await _run_vtable_js(
@@ -1116,10 +1127,7 @@ async def drag_column(
         }
 
     return {
-        "status": "success",
         "source": {"col": source_col, "field": src_field, "title": resolved["titleOf"]},
-        "target": {"col": target_col, "field": tgt_field, "title": resolved["targetTitle"]},
-        "position": pos,
         "drop": {
             "col": drop_col,
             "field": fields_before[drop_col] if drop_col < len(fields_before) else None,
@@ -1143,9 +1151,7 @@ async def drag_column(
             {"field": f, "title": t} for f, t in zip(fields_after, titles_after)
         ],
     }
-
-
-async def resize_column(host, page, col: Union[int, str], width: int) -> dict:
+async def resize_column(host, page, col: Union[int, str], width: int, visualize: bool = False) -> dict:
     """通过真实鼠标拖拽 VTable 列头分隔线，把指定列宽调整到目标像素值。"""
     if not width or int(width) <= 0:
         raise RuntimeError(f"width 必须为正数 (px), 收到: {width}")
@@ -1196,6 +1202,13 @@ async def resize_column(host, page, col: Union[int, str], width: int) -> dict:
         f"width {cur_width}px -> {target_width}px "
         f"drag ({start_x:.1f}, {start_y:.1f}) -> ({target_x:.1f}, {start_y:.1f})"
     )
+    if visualize:
+        try:
+            from qa_automation.browser.visual import VirtualCursor
+
+            await VirtualCursor.drag(page, start_x, start_y, target_x, start_y)
+        except Exception:
+            pass
     await page.mouse.move(start_x, start_y)
     await asyncio.sleep(0.12)  # 悬停稳定, 让 VTable 进入 resize 判定区
     await page.mouse.down()
@@ -1203,7 +1216,6 @@ async def resize_column(host, page, col: Union[int, str], width: int) -> dict:
     await page.mouse.move(target_x, start_y, steps=18)
     await asyncio.sleep(0.15)  # 落点悬停稳定 (VTable 渲染拖拽反馈)
     await page.mouse.up()
-
     # 轮询列宽直至接近目标 (canvas 无 DOM 信号, 状态轮询替代固定 sleep)
     after = None
     for _ in range(10):

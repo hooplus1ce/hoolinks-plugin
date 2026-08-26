@@ -16,11 +16,17 @@ from mcp.types import Icon
 
 from qa_automation.browser import vtable as vt
 from qa_automation.browser.lifecycle import PlaywrightLifecycle
-from qa_automation.components.tools.browser import _active_iframe_frame, _err, _lifecycle
+from qa_automation.components.tools.browser import (
+    _active_iframe_frame,
+    _err,
+    _lifecycle,
+    _resolve_locator,
+    _visualize_default,
+)
 
 _VISIBLE_MODAL_JS = """() => {
-  for (const wrap of document.querySelectorAll('.ant-modal-wrap')) {
-    if (wrap.classList.contains('ant-modal-mask-hidden')) continue;
+  const wraps = document.querySelectorAll('.ant-modal-wrap');
+  for (const wrap of wraps) {
     const modal = wrap.querySelector('.ant-modal') || wrap;
     const st = window.getComputedStyle(modal);
     if (st.display === 'none' || st.visibility === 'hidden') continue;
@@ -281,11 +287,14 @@ async def vtable_select_rows(
     row_indexes: list[int],
     session: str | None = None,
     action: str = "check",
+    visualize: bool | None = None,
 ) -> dict:
     """通过真实鼠标点击 VTable canvas 上的复选框勾选/取消勾选指定行。"""
     try:
         host, page = await _vtable_host(ctx, session)
-        result = await vt.select_rows(host, page, row_indexes, action)
+        result = await vt.select_rows(
+            host, page, row_indexes, action, visualize=_visualize_default(visualize)
+        )
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
@@ -303,11 +312,14 @@ async def vtable_drag_column(
     target: int | str,
     position: str = "after",
     session: str | None = None,
+    visualize: bool | None = None,
 ) -> dict:
     """通过真实鼠标拖拽 VTable 列头换位。"""
     try:
         host, page = await _vtable_host(ctx, session)
-        result = await vt.drag_column(host, page, source, target, position)
+        result = await vt.drag_column(
+            host, page, source, target, position, visualize=_visualize_default(visualize)
+        )
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
@@ -331,6 +343,7 @@ async def vtable_resize_column(
     target_width: int | None = None,
     new_width: int | None = None,
     session: str | None = None,
+    visualize: bool | None = None,
 ) -> dict:
     """通过真实鼠标拖拽 VTable 列头分隔线调整列宽。
 
@@ -369,7 +382,9 @@ async def vtable_resize_column(
             return {"ok": False, "error": "缺少目标列宽参数：请传入 width（目标像素宽度，如 200）"}
 
         host, page = await _vtable_host(ctx, session)
-        result = await vt.resize_column(host, page, target_col, int(target_w))
+        result = await vt.resize_column(
+            host, page, target_col, int(target_w), visualize=_visualize_default(visualize)
+        )
         return {"ok": True, **result}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
