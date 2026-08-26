@@ -23,6 +23,7 @@ BROWSER_TOOLS = {
     "page_click",
     "page_fill",
     "page_screenshot",
+    "page_drag",
 }
 
 

@@ -866,6 +866,190 @@ async def tab_switch(
     except Exception as exc:
         return _err(exc)
 
+async def _do_drag_with_visual(
+    page: Page,
+    from_x: float,
+    from_y: float,
+    to_x: float,
+    to_y: float,
+    steps: int = 15,
+    delay_ms: int = 100,
+    button: str = "left",
+    visualize: bool = False,
+) -> None:
+    """真实鼠标平滑拖拽执行体（移动到位 -> 按下 -> 分步移动 -> 松开）。"""
+    if visualize:
+        try:
+            from qa_automation.browser.visual import VirtualCursor
+
+            await VirtualCursor.drag(page, from_x, from_y, to_x, to_y)
+        except Exception:
+            pass
+    btn = button if button in ("left", "right", "middle") else "left"
+    await page.mouse.move(from_x, from_y)
+    await page.mouse.down(button=btn)
+    if delay_ms > 0:
+        await asyncio.sleep(delay_ms / 1000.0)
+    await page.mouse.move(to_x, to_y, steps=max(1, int(steps)))
+    if delay_ms > 0:
+        await asyncio.sleep(delay_ms / 1000.0)
+    await page.mouse.up(button=btn)
+
+
+@tool(
+    title="Page: Drag (通用拖拽)",
+    description="在页面上执行通用真实鼠标拖拽操作。支持【绝对坐标模式】(from_x, from_y -> to_x, to_y) 与【语义定位模式】(from 元素 -> to 元素)。适用于滑块拖动、弹窗拖拽、列表/看板排序、Canvas 图元等任意 Web 组件。",
+    icons=[_BROWSER_ICON],
+    tags={"browser", "page", "drag", "interaction"},
+)
+async def page_drag(
+    ctx: Context,
+    session: str | None = None,
+    from_x: float | None = None,
+    from_y: float | None = None,
+    to_x: float | None = None,
+    to_y: float | None = None,
+    from_role: str | None = None,
+    from_name: str | None = None,
+    from_text: str | None = None,
+    from_placeholder: str | None = None,
+    from_css: str | None = None,
+    from_xpath: str | None = None,
+    to_role: str | None = None,
+    to_name: str | None = None,
+    to_text: str | None = None,
+    to_placeholder: str | None = None,
+    to_css: str | None = None,
+    to_xpath: str | None = None,
+    steps: int = 15,
+    delay_ms: int = 100,
+    button: str = "left",
+    in_iframe: bool = True,
+    visualize: bool | None = None,
+) -> dict:
+    """通用页面真实鼠标拖拽。
+
+    Args:
+        session: 目标会话名（多账号场景必须显式指定；缺省使用激活会话）。
+        from_x/from_y: 起始点视口绝对坐标。
+        to_x/to_y: 目标点视口绝对坐标。
+        from_role/from_name/from_text/from_placeholder/from_css/from_xpath: 起始元素定位参数。
+        to_role/to_name/to_text/to_placeholder/to_css/to_xpath: 目标元素定位参数。
+        steps: 拖拽移动插值步数（默认 15 步平滑移动，确保触发 mousemove 节流监听）。
+        delay_ms: 按下后和松开前的等待延迟（毫秒，默认 100ms，确保触发 dragstart 与 drop 事件）。
+        button: 鼠标按键（left/right/middle，默认 left）。
+        in_iframe: 是否在激活 iframe 内查找元素（默认 true）。
+        visualize: 是否显示虚拟光标拖拽视效。
+    """
+    from qa_automation.browser.visual import VirtualCursor
+
+    visualize = _visualize_default(visualize)
+    lc = _lifecycle(ctx)
+    try:
+        page = await lc.page(session)
+    except Exception as exc:
+        return _err(exc)
+
+    before_url = page.url
+    _, before_iframe = await _active_iframe_snapshot(page)
+
+    if visualize:
+        try:
+            await VirtualCursor.attach(page)
+        except Exception:
+            visualize = False
+
+    async def _clear_visuals():
+        if visualize:
+            try:
+                await VirtualCursor.clear(page)
+            except Exception:
+                pass
+
+    try:
+        # 解析起始坐标
+        start_x, start_y = from_x, from_y
+        has_from_loc = any([from_role, from_name, from_text, from_placeholder, from_css, from_xpath])
+        if start_x is None or start_y is None:
+            if not has_from_loc:
+                return {"ok": False, "error": "drag requires start position (from_x, from_y) or start locator (from_role/from_name/from_css/...)"}
+            loc_from = await _resolve_locator(
+                page,
+                role=_clean_str(from_role),
+                name=_clean_str(from_name),
+                text=_clean_str(from_text),
+                placeholder=_clean_str(from_placeholder),
+                css=_clean_str(from_css),
+                xpath=_clean_str(from_xpath),
+                in_iframe=in_iframe,
+            )
+            box_from = await loc_from.bounding_box()
+            if box_from is None:
+                return {"ok": False, "error": "failed to get bounding box for start element"}
+            start_x = box_from["x"] + box_from["width"] / 2
+            start_y = box_from["y"] + box_from["height"] / 2
+
+        # 解析终点坐标
+        end_x, end_y = to_x, to_y
+        has_to_loc = any([to_role, to_name, to_text, to_placeholder, to_css, to_xpath])
+        if end_x is None or end_y is None:
+            if not has_to_loc:
+                return {"ok": False, "error": "drag requires target position (to_x, to_y) or target locator (to_role/to_name/to_css/...)"}
+            loc_to = await _resolve_locator(
+                page,
+                role=_clean_str(to_role),
+                name=_clean_str(to_name),
+                text=_clean_str(to_text),
+                placeholder=_clean_str(to_placeholder),
+                css=_clean_str(to_css),
+                xpath=_clean_str(to_xpath),
+                in_iframe=in_iframe,
+            )
+            box_to = await loc_to.bounding_box()
+            if box_to is None:
+                return {"ok": False, "error": "failed to get bounding box for target element"}
+            end_x = box_to["x"] + box_to["width"] / 2
+            end_y = box_to["y"] + box_to["height"] / 2
+
+        await _do_drag_with_visual(
+            page,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            steps=steps,
+            delay_ms=delay_ms,
+            button=button,
+            visualize=visualize,
+        )
+        observation = await _observe_layers(page, before_url, before_iframe)
+        mode = "locator" if (has_from_loc or has_to_loc) else "coordinate"
+        res = {
+            "ok": True,
+            "mode": mode,
+            "action": "drag",
+            "from": {"x": round(float(start_x), 1), "y": round(float(start_y), 1)},
+            "to": {"x": round(float(end_x), 1), "y": round(float(end_y), 1)},
+            "steps": max(1, int(steps)),
+            "delay_ms": max(0, int(delay_ms)),
+            "observation": observation,
+        }
+        if has_from_loc:
+            res["from_locator"] = {
+                "role": from_role, "name": from_name, "text": from_text,
+                "placeholder": from_placeholder, "css": from_css, "xpath": from_xpath,
+            }
+        if has_to_loc:
+            res["to_locator"] = {
+                "role": to_role, "name": to_name, "text": to_text,
+                "placeholder": to_placeholder, "css": to_css, "xpath": to_xpath,
+            }
+        return res
+    except Exception as exc:
+        return _err(exc)
+    finally:
+        await _clear_visuals()
+
 
 @tool(
     title="Page: Interact (通用交互)",
@@ -889,6 +1073,10 @@ async def page_interact(
     xpath: str | None = None,
     x: float | None = None,
     y: float | None = None,
+    to_x: float | None = None,
+    to_y: float | None = None,
+    steps: int = 15,
+    delay_ms: int = 100,
     value: str | None = None,
     input_method: str = "fill",
     clear_first: bool = True,
@@ -901,12 +1089,15 @@ async def page_interact(
 
     Args:
         session: 目标会话名（多账号场景必须显式指定；缺省使用激活会话）。
-        action: click/fill/hover/dblclick/rightclick/select/press/check/uncheck。
+        action: click/fill/hover/dblclick/rightclick/select/press/check/uncheck/drag。
         role/name: 语义定位（get_by_role；name 取 analyze_current_page 返回的真实值，如"新 增"）。
         text: 按可见文本定位。
         placeholder: 按占位符定位。
         css/xpath: 结构定位（xpath 为 XPath 表达式，结构兜底）。
-        x/y: 视口绝对坐标（坐标模式，与定位参数互斥；工具不做坐标计算，直接使用）。
+        x/y: 视口绝对坐标（坐标模式；或 drag 动作起始坐标）。
+        to_x/to_y: drag 动作目标视口坐标。
+        steps: drag 动作插值步数（默认 15）。
+        delay_ms: drag 动作按下/释放延迟毫秒（默认 100）。
         value: fill/select/press 的输入值。
         input_method: fill=Playwright 原生填充（快稳，自动清空）; type=逐字模拟打字
             （Ctrl+A 清空 + 0.1s 间隔，适用于监听键盘事件的组件）。
@@ -966,12 +1157,20 @@ async def page_interact(
                 await page.mouse.move(x, y)
             elif action == "rightclick":
                 await page.mouse.click(x, y, button="right")
+            elif action == "drag":
+                if to_x is None or to_y is None:
+                    return {"ok": False, "error": "drag action in coordinate mode requires both to_x and to_y"}
+                await _do_drag_with_visual(page, x, y, to_x, to_y, steps=steps, delay_ms=delay_ms, visualize=visualize)
             else:
                 return {"ok": False, "error": f"action {action!r} not supported in coordinate mode"}
             if visualize and action in ("click", "dblclick", "rightclick"):
                 await VirtualCursor.clear(page)  # 点击完成立即清除视效（finally 幂等兜底）
-            observation = await _observe_layers(page, before_url, before_iframe) if action in ("click", "dblclick", "rightclick", "hover") else None
-            return {"ok": True, "mode": "coordinate", "x": x, "y": y, "action": action, "visualize": visualize, "observation": observation}
+            observation = await _observe_layers(page, before_url, before_iframe) if action in ("click", "dblclick", "rightclick", "hover", "drag") else None
+            res = {"ok": True, "mode": "coordinate", "x": x, "y": y, "action": action, "visualize": visualize, "observation": observation}
+            if action == "drag":
+                res["to_x"] = to_x
+                res["to_y"] = to_y
+            return res
         except Exception as exc:
             return _err(exc)
         finally:
@@ -1080,6 +1279,15 @@ async def page_interact(
             await locator.check()
         elif action == "uncheck":
             await locator.uncheck()
+        elif action == "drag":
+            if to_x is None or to_y is None:
+                return {"ok": False, "error": "drag action in locator mode requires both to_x and to_y"}
+            box = await locator.bounding_box(timeout=timeout_ms)
+            if box is None:
+                return {"ok": False, "error": "failed to get bounding box for source element"}
+            start_x = box["x"] + box["width"] / 2
+            start_y = box["y"] + box["height"] / 2
+            await _do_drag_with_visual(page, start_x, start_y, to_x, to_y, steps=steps, delay_ms=delay_ms, visualize=visualize)
         else:
             return {"ok": False, "error": f"unknown action {action!r}"}
         # 点击类动作：点击反馈波纹 → 点击完成立即清除（finally 幂等兜底）

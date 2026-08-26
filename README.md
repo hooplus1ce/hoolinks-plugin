@@ -141,7 +141,7 @@ SCM_BASE_URL=https://scm.example.com
 
 ### 第 2 步：在 Agent 客户端中添加插件
 
-将 `https://github.com/hooplus1ce/hoolinks-plugin.git` 添加为插件。客户端完成握手后，插件暴露 46 个 MCP 工具与 2 个 Agent Skill。
+将 `https://github.com/hooplus1ce/hoolinks-plugin.git` 添加为插件。客户端完成握手后，插件暴露 47 个 MCP 工具与 2 个 Agent Skill。
 
 ### 第 3 步：向 Agent 下达测试指令
 

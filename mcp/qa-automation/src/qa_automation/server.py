@@ -19,7 +19,7 @@ SERVER_INSTRUCTIONS = """你是 APS/SCM/WMS 企业级 UI 自动化测试 MCP 服
 - session_create: 显式新建命名会话（默认单会话已被 browser_connect 自动完成；多账号隔离测试传 use_default=false）
 - login_with_captcha: SCM 完整登录（自动请求验证码→视觉识别→登录→cookies 注入→跳转工作台），账号密码从环境变量/accounts.json 读取
 - captcha_recognize / vision_recognize: 视觉识别（验证码/通用图片）
-- page_goto / page_click / page_fill / page_screenshot: 页面操作
+- page_goto / page_click / page_fill / page_drag / page_screenshot: 页面操作（page_drag 支持绝对坐标与语义元素双模式通用拖拽）
 - session_save_state: 登录态落盘复用
 - download_file / upload_file: 文件下载（CDP 重定向，xlsx 自动预览）与上传（filechooser 拦截）
 - vtable_*: VTable canvas 表格取数/勾选/拖拽（APS 排产表格场景，canvas 无 DOM 复选框）

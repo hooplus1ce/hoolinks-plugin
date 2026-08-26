@@ -155,6 +155,17 @@ _INSTALL_JS = r"""
     }
     return moveTo(x, y).then(() => createRipple(x, y));
   }
+  function drag(x1, y1, x2, y2) {
+    mount();
+    return moveTo(x1, y1)
+      .then(() => {
+        createRipple(x1, y1);
+        return moveTo(x2, y2);
+      })
+      .then(() => {
+        createRipple(x2, y2);
+      });
+  }
   function clear() {
     // 交互完成：全部特效图层从 DOM 移除，清理全部定时器与动画；保留全局坐标持久态
     state.anim?.cancel();
@@ -165,7 +176,7 @@ _INSTALL_JS = r"""
     state.host = null; state.root = null; state.cursor = null; state.highlight = null;
     // 保留 state.x / state.y 与 globalThis[POS_KEY]，不重置为 (0,0)
   }
-  globalThis[KEY] = { mount, moveTo, target, clickAt, clear, version: 2 };
+  globalThis[KEY] = { mount, moveTo, target, clickAt, drag, clear, version: 2 };
   mount();
 })();
 """.replace("%CURSOR_IMAGE%", json.dumps(_CURSOR_IMAGE))
@@ -223,6 +234,17 @@ class VirtualCursor:
             await asyncio.wait_for(
                 page.evaluate(_invoke(f"globalThis[{_key()}].clickAt({x}, {y})")),
                 timeout=0.6,
+            )
+        except Exception:
+            pass
+    @staticmethod
+    async def drag(page, from_x: float, from_y: float, to_x: float, to_y: float) -> None:
+        """光标移动到起始点按下并平滑拖拽至目标点释放（带超时保护）。"""
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                page.evaluate(_invoke(f"globalThis[{_key()}].drag({from_x}, {from_y}, {to_x}, {to_y})")),
+                timeout=1.2,
             )
         except Exception:
             pass

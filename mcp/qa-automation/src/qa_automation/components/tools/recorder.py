@@ -51,7 +51,7 @@ _FRAME_SELECTOR_JS = """el => {
 
 class FlowStep(BaseModel):
     step_number: int = Field(..., description="步骤编号")
-    action: str = Field(..., description="动作类型: click/fill/select/hover/dblclick/rightclick/press")
+    action: str = Field(..., description="动作类型: click/fill/select/hover/dblclick/rightclick/press/drag")
     locator_type: str = Field(..., description="定位策略: role/text/placeholder/xpath/css/coordinate")
     locator_value: str = Field(..., description="定位主参数值")
     locator_extra: str | None = Field(default=None, description="可访问名称（role 定位时）")
@@ -209,6 +209,10 @@ async def execute_and_record(
     xpath: str | None = None,
     x: float | None = None,
     y: float | None = None,
+    to_x: float | None = None,
+    to_y: float | None = None,
+    steps: int = 15,
+    delay_ms: int = 100,
     value: str | None = None,
     expected_result: str | None = None,
     session: str | None = None,
@@ -217,7 +221,7 @@ async def execute_and_record(
     """执行单条动作并记录步骤。
 
     Args:
-        action: 动作类型，支持 click/fill/select/hover/dblclick/rightclick/press（默认 click）。
+        action: 动作类型，支持 click/fill/select/hover/dblclick/rightclick/press/drag（默认 click）。
         description: 该步骤的业务含义描述（如 '点击查询按钮'）。
         role: 元素语义角色（如 button, textbox, combobox, option 等）。
         name: 元素可访问名称（与 role 搭配使用，如 '新 增'）。
@@ -225,8 +229,12 @@ async def execute_and_record(
         placeholder: 按输入框占位符定位。
         css: CSS 选择器定位（结构兜底）。
         xpath: XPath 表达式定位（结构兜底）。
-        x: 视口绝对横坐标（坐标模式）。
-        y: 视口绝对纵坐标（坐标模式）。
+        x: 视口绝对横坐标（坐标模式；或 drag 动作起始横坐标）。
+        y: 视口绝对纵坐标（坐标模式；或 drag 动作起始纵坐标）。
+        to_x: drag 动作目标视口横坐标。
+        to_y: drag 动作目标视口纵坐标。
+        steps: drag 动作插值步数（默认 15）。
+        delay_ms: drag 动作按下/释放延迟毫秒（默认 100）。
         value: fill/select/press 动作所需的输入或选择值。
         expected_result: 该步骤预期达到的结果描述。
         session: 目标会话名（多账号场景显式指定；缺省使用当前激活会话）。
@@ -263,6 +271,13 @@ async def execute_and_record(
                 await page.mouse.move(x, y)
             elif action_key == "rightclick":
                 await page.mouse.click(x, y, button="right")
+            elif action_key == "drag":
+                if to_x is None or to_y is None:
+                    return {"ok": False, "error": "drag action in coordinate mode requires both to_x and to_y"}
+                from qa_automation.components.tools.browser import _do_drag_with_visual
+
+                await _do_drag_with_visual(page, x, y, to_x, to_y, steps=steps, delay_ms=delay_ms)
+                value = value or f"{x},{y}->{to_x},{to_y}"
             else:
                 return {"ok": False, "error": f"action {action!r} not supported in coordinate mode"}
             locator_type, locator_value, locator_extra = "coordinate", f"{x},{y}", None
@@ -282,7 +297,20 @@ async def execute_and_record(
                 in_iframe=in_iframe,
                 return_frame=True,
             )
-            await _execute_action(page, frame, locator, action_key, value)
+            if action_key == "drag":
+                if to_x is None or to_y is None:
+                    return {"ok": False, "error": "drag action in locator mode requires target to_x and to_y"}
+                box = await locator.bounding_box()
+                if box is None:
+                    raise ValueError("failed to get bounding box for drag source element")
+                start_x = box["x"] + box["width"] / 2
+                start_y = box["y"] + box["height"] / 2
+                from qa_automation.components.tools.browser import _do_drag_with_visual
+
+                await _do_drag_with_visual(page, start_x, start_y, to_x, to_y, steps=steps, delay_ms=delay_ms)
+                value = value or f"to: {to_x},{to_y}"
+            else:
+                await _execute_action(page, frame, locator, action_key, value)
             frame_path = await _frame_path(frame)
     except Exception as exc:
         return _err(exc)

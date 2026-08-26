@@ -10,7 +10,7 @@
 每步动作 schema：
   {action, role, name, text, placeholder, css, xpath, x, y,
    value, input_method, clear_first, press_enter, key, fallbacks}
-  - action: click/fill/select/press/hover/dblclick/rightclick/check/uncheck
+  - action: click/fill/select/press/hover/dblclick/rightclick/check/uncheck/drag
   - 定位: role+name / text / placeholder / css / xpath（一个维度）或 x/y 坐标
   - fallbacks: 可选 [{…完整动作参数}] 备用定位，主定位失败按序尝试
   - 自动附加: css 含 li 与 [title=]（antd 下拉选项）时生成 >> nth=0..3 变体
@@ -40,7 +40,7 @@ _CHAIN_ICON = Icon(
     mime_type="image/svg+xml",
 )
 
-_SUPPORTED = {"click", "fill", "select", "press", "hover", "dblclick", "rightclick", "check", "uncheck"}
+_SUPPORTED = {"click", "fill", "select", "press", "hover", "dblclick", "rightclick", "check", "uncheck", "drag"}
 
 
 def _action_key(act: dict) -> str:
@@ -151,6 +151,18 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
                 except Exception:  # noqa: BLE001
                     pass
             await page.mouse.move(x, y)
+        elif action == "drag":
+            to_x, to_y = act.get("to_x"), act.get("to_y")
+            if to_x is None or to_y is None:
+                raise ValueError("drag action in coordinate mode requires both to_x and to_y")
+            steps = int(act.get("steps") or 15)
+            delay_ms = int(act.get("delay_ms") or 100)
+            button = str(act.get("button") or "left")
+            from qa_automation.components.tools.browser import _do_drag_with_visual
+
+            await _do_drag_with_visual(
+                page, x, y, to_x, to_y, steps=steps, delay_ms=delay_ms, button=button, visualize=visualize
+            )
         else:
             raise ValueError(f"action {action!r} not supported in coordinate mode")
         return
@@ -277,6 +289,23 @@ async def _run_single(page, act: dict, visualize: bool) -> None:
         await locator.check(timeout=action_timeout)
     elif action == "uncheck":
         await locator.uncheck(timeout=action_timeout)
+    elif action == "drag":
+        to_x, to_y = act.get("to_x"), act.get("to_y")
+        if to_x is None or to_y is None:
+            raise ValueError("drag action in locator mode requires target to_x and to_y")
+        box = await _safe_box(locator, timeout=action_timeout)
+        if box is None:
+            raise ValueError("failed to get bounding box for drag source element")
+        start_x = box["x"] + box["width"] / 2
+        start_y = box["y"] + box["height"] / 2
+        steps = int(act.get("steps") or 15)
+        delay_ms = int(act.get("delay_ms") or 100)
+        button = str(act.get("button") or "left")
+        from qa_automation.components.tools.browser import _do_drag_with_visual
+
+        await _do_drag_with_visual(
+            page, start_x, start_y, to_x, to_y, steps=steps, delay_ms=delay_ms, button=button, visualize=visualize
+        )
 
 @tool(
     title="Chain: Execute Actions",
