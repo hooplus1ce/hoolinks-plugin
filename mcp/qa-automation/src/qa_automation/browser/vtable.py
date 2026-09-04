@@ -143,6 +143,23 @@ async def refresh_instance(host, table_index: int = 0) -> dict:
     }
 
 
+async def list_tables(host) -> list:
+    """枚举当前页面全部 VTable 候选容器（含弹窗内子表）。
+
+    返回每个容器的 index / 类名 / 是否位于弹窗 / 是否可见 / 行列数，
+    供 AI 一次性定位表格，避免反复试 table_index。只读，不改变已挂载实例。
+    """
+    result = await _run_vtable_js(host, """
+    (() => {
+        const list = listVTableContainers();
+        return { ok: true, tables: list };
+    })()
+    """)
+    if result.get("error"):
+        raise RuntimeError(f"枚举 VTable 容器失败: {result.get('error')}")
+    return result.get("tables", [])
+
+
 async def analyze_headers(
     host, max_col: int = 200, sample_rows: int = 2
 ) -> List[dict]:
@@ -196,6 +213,7 @@ async def scan_columns(host, max_col: int = 200, table_index: int = 0) -> List[d
     result = await _run_vtable_js(host, f"""
     (() => {{
         const m = mountVTable({int(table_index)});
+        if (!m.ok) return {{ error: m.reason }};
         const cols = scanColumns({int(max_col)});
         
         function extractText(val) {{

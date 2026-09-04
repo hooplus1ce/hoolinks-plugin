@@ -38,11 +38,22 @@ function findVisibleVTableElement() {
   return null;
 }
 
+function vtableContainerMeta(el) {
+  if (!el) return null;
+  var cls = (el.className || '').toString();
+  var modal = !!(el.closest && el.closest('.ant-modal, .ant-modal-wrap'));
+  var r = el.getBoundingClientRect();
+  var visible = r.width > 0 && r.height > 0;
+  return { className: cls.slice(0, 80), modal: modal, visible: visible, width: Math.round(r.width), height: Math.round(r.height) };
+}
+
 function mountVTable(index) {
   var vtableEls = [].slice.call(document.querySelectorAll('.vtable, [class*="vtable"], [class*="Table"], .ant-table-wrapper'));
-  // 过滤出真正包含表格内容或 canvas 的容器
+  // 仅保留真正承载 VTable 渲染的容器（VTable 必有 canvas）。
+  // 旧的过滤含 `className.indexOf('vtable') !== -1`，会把 vtable-filter-menu 等
+  // 无 canvas 的噪声容器纳入，导致 index 语义漂移（弹窗子表 index 难定位）。
   vtableEls = vtableEls.filter(function(el) {
-    return el.querySelector('canvas') || el.querySelector('table') || el.className.indexOf('vtable') !== -1;
+    return !!el.querySelector('canvas');
   });
   // 优先挂载可见弹窗(portal)内的 VTable：弹窗(如"选择设备")是当前交互目标，
   // 不应按 DOM 顺序取页面上第一个表格(可能选中隐藏/背景/0 行表)。
@@ -65,6 +76,8 @@ function mountVTable(index) {
   }
   var targetIdx = (typeof index === 'number') ? index : (typeof window._vtableIndex === 'number' ? window._vtableIndex : 0);
   var targetEl = vtableEls[targetIdx] || vtableEls[0];
+  if (!targetEl) return { ok: false, reason: 'no vtable container found for index ' + targetIdx };
+  var containerMeta = vtableContainerMeta(targetEl);
   var nodesToTry = [targetEl.querySelector('canvas'), targetEl, targetEl.parentElement].filter(Boolean);
   for (var ni = 0; ni < nodesToTry.length; ni++) {
     var node = nodesToTry[ni];
@@ -83,7 +96,7 @@ function mountVTable(index) {
             window._vtable = c;
             window._vtableElement = targetEl;
             window._vtableIndex = targetIdx;
-            return { ok: true, index: targetIdx, levels: count, colCount: c.colCount, rowCount: c.rowCount };
+            return { ok: true, index: targetIdx, levels: count, colCount: c.colCount, rowCount: c.rowCount, container: containerMeta };
           }
         }
       }
@@ -99,7 +112,7 @@ function mountVTable(index) {
                 window._vtable = hc;
                 window._vtableElement = targetEl;
                 window._vtableIndex = targetIdx;
-                return { ok: true, index: targetIdx, levels: count, colCount: hc.colCount, rowCount: hc.rowCount };
+                return { ok: true, index: targetIdx, levels: count, colCount: hc.colCount, rowCount: hc.rowCount, container: containerMeta };
               }
             }
           }
@@ -110,6 +123,31 @@ function mountVTable(index) {
     }
   }
   return { ok: false, reason: 'vtableInstance not found for index ' + targetIdx };
+}
+
+// 枚举全部 VTable 候选容器（只含 canvas 的），返回 index/类名/modal归属/可见性/行列数，
+// 供 AI 一次性定位（含弹窗内子表），避免反复试 index。只读：读列数后恢复原挂载状态。
+function listVTableContainers() {
+  var vtableEls = [].slice.call(document.querySelectorAll('.vtable, [class*="vtable"], [class*="Table"], .ant-table-wrapper'));
+  vtableEls = vtableEls.filter(function(el) { return !!el.querySelector('canvas'); });
+  var savedV = window._vtable, savedEl = window._vtableElement, savedIdx = window._vtableIndex;
+  var list = [];
+  for (var i = 0; i < vtableEls.length; i++) {
+    var meta = vtableContainerMeta(vtableEls[i]);
+    var entry = { index: i, className: meta.className, modal: meta.modal, visible: meta.visible, width: meta.width, height: meta.height };
+    var m = mountVTable(i);
+    if (m.ok) {
+      entry.colCount = m.colCount;
+      entry.rowCount = m.rowCount;
+      entry.mounted = true;
+    } else {
+      entry.mounted = false;
+      entry.reason = m.reason;
+    }
+    list.push(entry);
+  }
+  window._vtable = savedV; window._vtableElement = savedEl; window._vtableIndex = savedIdx;
+  return list;
 }
 
 // ============ 2. 图标功能映射 ============

@@ -73,6 +73,22 @@ _VTABLE_ICON = Icon(
 
 
 @tool(
+    title="VTable: List Tables",
+    description="枚举当前页面全部 VTable 实例（含弹窗内子表）：返回每个容器的 table_index、类名、是否位于弹窗（modal）、是否可见、行列数。用于一次性定位表格（尤其弹窗内子表），避免反复试 table_index。只读，不改变已挂载实例。",
+    icons=[_VTABLE_ICON],
+    tags={"vtable", "browser", "qa"},
+)
+async def vtable_list_tables(ctx: Context, session: str | None = None) -> dict:
+    """枚举页面全部 VTable 容器。"""
+    try:
+        host, _ = await _vtable_host(ctx, session)
+        tables = await vt.list_tables(host)
+        return {"ok": True, "tables": tables, "count": len(tables)}
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@tool(
     title="VTable: Refresh Instance",
     description="刷新目标页面中最新 VTable 实例（window._vtable），作为其他 vtable 操作的前置条件。",
     icons=[_VTABLE_ICON],
