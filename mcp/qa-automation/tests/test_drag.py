@@ -218,3 +218,5 @@ async def test_page_drag_missing_args(client: Client, cdp_url: str) -> None:
         assert "drag requires" in r.data["error"]
     finally:
         await client.call_tool("session_close", {"name": "drag_session"})
+
+pytestmark = pytest.mark.slow

@@ -294,3 +294,5 @@ async def test_api_login_retries_on_reject(cdp_url: str, mock_scm_json: str) -> 
         assert {c["name"] for c in cookies} >= {"SCM_SESSION"}
     finally:
         await lc.close()
+
+pytestmark = pytest.mark.slow

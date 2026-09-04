@@ -1,5 +1,6 @@
 """虚拟光标 + 目标高亮可视化测试：注入、高亮、波纹、完成后 DOM 清除。"""
 from __future__ import annotations
+import pytest
 
 from qa_automation.browser.lifecycle import PlaywrightLifecycle
 from qa_automation.browser.visual import VirtualCursor
@@ -167,3 +168,5 @@ async def test_cursor_position_continuity_across_actions(cdp_url: str) -> None:
         await VirtualCursor.clear(page)
     finally:
         await lc.close()
+
+pytestmark = pytest.mark.slow

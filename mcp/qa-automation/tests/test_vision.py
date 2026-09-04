@@ -15,6 +15,8 @@ PNG_BYTES = (
 JPEG_BYTES = b"\xff\xd8\xff" + b"\x00" * 8
 
 
+pytestmark = pytest.mark.slow
+
 def test_mime_detection() -> None:
     assert v._mime_from_bytes(PNG_BYTES) == "image/png"
     assert v._mime_from_bytes(JPEG_BYTES) == "image/jpeg"

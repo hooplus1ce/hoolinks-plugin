@@ -483,3 +483,4 @@ async def test_analyze_radio_button_group(client: Client, cdp_url: str, mock_pag
     finally:
         await client.call_tool("session_close", {"name": sess})
 
+pytestmark = pytest.mark.slow

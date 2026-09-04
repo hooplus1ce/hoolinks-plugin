@@ -25,7 +25,12 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["src"]
-addopts = "-n 4"
+# 默认快速回归：并行跑纯逻辑/无浏览器测试。需要真实浏览器/网络的慢集成测试
+# 用 `pytest -m slow`（或 `-m "not slow"` 之外组合）显式运行。
+addopts = "-n 4 -m 'not slow'"
+markers = [
+    "slow: integration tests requiring a real browser or network (run with `-m slow`)",
+]
 
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple/"

@@ -33,6 +33,8 @@ async def client() -> Client:
         yield c
 
 
+pytestmark = pytest.mark.slow
+
 async def test_browser_tools_registered(client: Client) -> None:
     tools = await client.list_tools()
     names = {t.name for t in tools}

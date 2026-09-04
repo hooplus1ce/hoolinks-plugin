@@ -168,3 +168,5 @@ async def test_chain_empty_actions(client: Client, cdp_url: str) -> None:
         assert r.data["ok"] is False and "不能为空" in r.data["error"]
     finally:
         await client.call_tool("session_close", {"name": "ch"})
+
+pytestmark = pytest.mark.slow

@@ -169,3 +169,5 @@ async def test_attach_9222_smoke(cdp_url: str) -> None:
         assert len(lc2._default_context.pages) >= 1
     finally:
         await lc2.close()
+
+pytestmark = pytest.mark.slow
