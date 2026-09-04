@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -44,7 +45,29 @@ load_dotenv(PROJECT_ROOT / ".env", override=False)
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", PROJECT_ROOT))
 # 资产根：使用该插件的项目目录（截图/导出用例/下载/证据等生成文件）。
 # 由使用方注入 WORK_DIR（Agent 客户端环境变量或 mcp.json env）；未配置回退 PROJECT_DIR。
-WORK_DIR = Path(os.environ.get("WORK_DIR", PROJECT_DIR))
+# 宿主环境可能把 WORK_DIR 注入为未展开的占位符（如字面量 "${PLUGIN_DATA}"）。此类
+# 占位符若不展开会生成名为 "${PLUGIN_DATA}" 的字面目录，令截图/证据路径不可预期。
+# 这里按 ${VAR} 形式展开环境变量；任一变量缺失导致仍有 "${" 残留时，回退 PROJECT_DIR。
+_WORKDIR_PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _resolve_work_dir() -> Path:
+    raw = os.environ.get("WORK_DIR")
+    if raw is None:
+        return PROJECT_DIR
+
+    def _sub(match: "re.Match[str]") -> str:
+        val = os.environ.get(match.group(1), "")
+        # 变量未定义：保留原占位符，供下方检测残留后回退
+        return val if val else match.group(0)
+
+    expanded = _WORKDIR_PLACEHOLDER_RE.sub(_sub, raw).strip()
+    if not expanded or "${" in expanded:
+        return PROJECT_DIR
+    return Path(expanded)
+
+
+WORK_DIR = _resolve_work_dir()
 
 
 def project_path(path: str) -> str:
